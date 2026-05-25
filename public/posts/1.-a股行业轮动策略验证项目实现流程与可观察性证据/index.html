@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en" dir="auto" data-theme="auto">
+
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="robots" content="index, follow">
+<title>A股行业轮动策略验证项目实现流程与可观察性证据 | 我的量化之路</title>
+<meta name="keywords" content="">
+<meta name="description" content="项目总览
+这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。
+我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。
+
+一、量化假设与研究目标设定（Research Hypothesis）
+做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。
+研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。
+
+  
+      
+          核心假设
+          含义
+          验证方法
+          本版结论
+      
+  
+  
+      
+          H1 日频动量假设
+          factor_score / trend_score 可以筛选潜在强势行业池
+          RankIC、分组收益、多空组合
+          不成立：5日 IC 显著为负，高分更像过热风险
+      
+      
+          H2 开盘微观结构假设
+          9:30-9:45 的三根 5分钟K 线排列有短期预测力
+          open8 事件面板、最终入选信号前瞻收益
+          部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强
+      
+      
+          H3 大盘异质性假设
+          A股不同市场状态下应切换 TargetA / TargetB 路径
+          固定 TargetA/B 消融
+          成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08%
+      
+  
+
+
+二、特征工程与多模态因子构建（Feature Engineering）
+这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。
+
+  
+      
+          因子/模块
+          实现方式
+          输出字段
+          用途
+      
+  
+  
+      
+          趋势/动量排序层
+          ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分
+          factor_score
+          形成日频候选强度评分，并用于 IC/分组收益验证
+      
+      
+          量价共振状态层
+          ma5&gt;= ma20，vol_ma5&gt;=vol_ma20的组合状态
+          trend_score：0/1/2
+          判断价格趋势与量能是否同向共振
+      
+      
+          微观结构信号层
+          analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列
+          strong_buy / buy / neutral / sell / strong_sell
+          用于 09:45 买入确认和开盘卖出风险拦截
+      
+      
+          极端尾部风险过滤层
+          正式9:45 crash_filter使用30日窗口，最近15日检查跌幅&gt;4.5%、阴线、成交量&gt;2倍20日均量
+          crash_filter
+          剔除近期出现极端放量下跌的高风险行业
+      
+  
+
+!特征工程与多层信号结构](/images/figure_03_feature_architecture.png)">
+<meta name="author" content="WANGKAN">
+<link rel="canonical" href="http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.cd9298b33628769aa1bc1acebbbfd7aa11ce81dfe03484d479e1907760249a1d.css" integrity="sha256-zZKYszYodpqhvBrOu7/XqhHOgd/gNITUeeGQd2Akmh0=" rel="preload stylesheet" as="style">
+<link rel="icon" href="http://localhost:1313/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
+<link rel="apple-touch-icon" href="http://localhost:1313/apple-touch-icon.png">
+<link rel="mask-icon" href="http://localhost:1313/safari-pinned-tab.svg">
+<meta name="theme-color" content="#2e2e33">
+<meta name="msapplication-TileColor" content="#2e2e33">
+<link rel="alternate" hreflang="en" href="http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/">
+<noscript>
+    <style>
+        #theme-toggle,
+        .top-link {
+            display: none;
+        }
+
+    </style>
+    <style>
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --theme: rgb(29, 30, 32);
+                --entry: rgb(46, 46, 51);
+                --primary: rgb(218, 218, 219);
+                --secondary: rgb(155, 156, 157);
+                --tertiary: rgb(65, 66, 68);
+                --content: rgb(196, 196, 197);
+                --code-block-bg: rgb(46, 46, 51);
+                --code-bg: rgb(55, 56, 62);
+                --border: rgb(51, 51, 51);
+                color-scheme: dark;
+            }
+
+            .list {
+                background: var(--theme);
+            }
+
+            .toc {
+                background: var(--entry);
+            }
+        }
+
+    </style>
+</noscript>
+<script>
+    if (localStorage.getItem("pref-theme") === "dark") {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else if (localStorage.getItem("pref-theme") === "light") {
+       document.querySelector("html").dataset.theme = 'light';
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else {
+        document.querySelector("html").dataset.theme = 'light';
+    }
+
+</script><meta property="og:url" content="http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/">
+  <meta property="og:site_name" content="我的量化之路">
+  <meta property="og:title" content="A股行业轮动策略验证项目实现流程与可观察性证据">
+  <meta property="og:description" content="项目总览 这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。 我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。
+一、量化假设与研究目标设定（Research Hypothesis） 做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。 研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。
+核心假设 含义 验证方法 本版结论 H1 日频动量假设 factor_score / trend_score 可以筛选潜在强势行业池 RankIC、分组收益、多空组合 不成立：5日 IC 显著为负，高分更像过热风险 H2 开盘微观结构假设 9:30-9:45 的三根 5分钟K 线排列有短期预测力 open8 事件面板、最终入选信号前瞻收益 部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强 H3 大盘异质性假设 A股不同市场状态下应切换 TargetA / TargetB 路径 固定 TargetA/B 消融 成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08% 二、特征工程与多模态因子构建（Feature Engineering） 这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。
+因子/模块 实现方式 输出字段 用途 趋势/动量排序层 ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分 factor_score 形成日频候选强度评分，并用于 IC/分组收益验证 量价共振状态层 ma5&gt;= ma20，vol_ma5&gt;=vol_ma20的组合状态 trend_score：0/1/2 判断价格趋势与量能是否同向共振 微观结构信号层 analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列 strong_buy / buy / neutral / sell / strong_sell 用于 09:45 买入确认和开盘卖出风险拦截 极端尾部风险过滤层 正式9:45 crash_filter使用30日窗口，最近15日检查跌幅&gt;4.5%、阴线、成交量&gt;2倍20日均量 crash_filter 剔除近期出现极端放量下跌的高风险行业 !特征工程与多层信号结构](/images/figure_03_feature_architecture.png)">
+  <meta property="og:locale" content="zh_cn">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="posts">
+    <meta property="article:published_time" content="2026-05-23T11:22:48+08:00">
+    <meta property="article:modified_time" content="2026-05-23T11:22:48+08:00">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="A股行业轮动策略验证项目实现流程与可观察性证据">
+  <meta name="twitter:description" content="项目总览 这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。 我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。
+一、量化假设与研究目标设定（Research Hypothesis） 做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。 研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。
+核心假设 含义 验证方法 本版结论 H1 日频动量假设 factor_score / trend_score 可以筛选潜在强势行业池 RankIC、分组收益、多空组合 不成立：5日 IC 显著为负，高分更像过热风险 H2 开盘微观结构假设 9:30-9:45 的三根 5分钟K 线排列有短期预测力 open8 事件面板、最终入选信号前瞻收益 部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强 H3 大盘异质性假设 A股不同市场状态下应切换 TargetA / TargetB 路径 固定 TargetA/B 消融 成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08% 二、特征工程与多模态因子构建（Feature Engineering） 这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。
+因子/模块 实现方式 输出字段 用途 趋势/动量排序层 ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分 factor_score 形成日频候选强度评分，并用于 IC/分组收益验证 量价共振状态层 ma5&gt;= ma20，vol_ma5&gt;=vol_ma20的组合状态 trend_score：0/1/2 判断价格趋势与量能是否同向共振 微观结构信号层 analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列 strong_buy / buy / neutral / sell / strong_sell 用于 09:45 买入确认和开盘卖出风险拦截 极端尾部风险过滤层 正式9:45 crash_filter使用30日窗口，最近15日检查跌幅&gt;4.5%、阴线、成交量&gt;2倍20日均量 crash_filter 剔除近期出现极端放量下跌的高风险行业 !特征工程与多层信号结构](/images/figure_03_feature_architecture.png)">
+
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "Posts",
+      "item": "http://localhost:1313/posts/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  2 ,
+      "name": "A股行业轮动策略验证项目实现流程与可观察性证据",
+      "item": "http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/"
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "A股行业轮动策略验证项目实现流程与可观察性证据",
+  "name": "A股行业轮动策略验证项目实现流程与可观察性证据",
+  "description": "项目总览 这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。 我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。\n一、量化假设与研究目标设定（Research Hypothesis） 做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。 研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。\n核心假设 含义 验证方法 本版结论 H1 日频动量假设 factor_score / trend_score 可以筛选潜在强势行业池 RankIC、分组收益、多空组合 不成立：5日 IC 显著为负，高分更像过热风险 H2 开盘微观结构假设 9:30-9:45 的三根 5分钟K 线排列有短期预测力 open8 事件面板、最终入选信号前瞻收益 部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强 H3 大盘异质性假设 A股不同市场状态下应切换 TargetA / TargetB 路径 固定 TargetA/B 消融 成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08% 二、特征工程与多模态因子构建（Feature Engineering） 这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。\n因子/模块 实现方式 输出字段 用途 趋势/动量排序层 ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分 factor_score 形成日频候选强度评分，并用于 IC/分组收益验证 量价共振状态层 ma5\u0026gt;= ma20，vol_ma5\u0026gt;=vol_ma20的组合状态 trend_score：0/1/2 判断价格趋势与量能是否同向共振 微观结构信号层 analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列 strong_buy / buy / neutral / sell / strong_sell 用于 09:45 买入确认和开盘卖出风险拦截 极端尾部风险过滤层 正式9:45 crash_filter使用30日窗口，最近15日检查跌幅\u0026gt;4.5%、阴线、成交量\u0026gt;2倍20日均量 crash_filter 剔除近期出现极端放量下跌的高风险行业 !特征工程与多层信号结构](/images/figure_03_feature_architecture.png)\n",
+  "keywords": [
+    
+  ],
+  "articleBody": "项目总览 这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。 我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。\n一、量化假设与研究目标设定（Research Hypothesis） 做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。 研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。\n核心假设 含义 验证方法 本版结论 H1 日频动量假设 factor_score / trend_score 可以筛选潜在强势行业池 RankIC、分组收益、多空组合 不成立：5日 IC 显著为负，高分更像过热风险 H2 开盘微观结构假设 9:30-9:45 的三根 5分钟K 线排列有短期预测力 open8 事件面板、最终入选信号前瞻收益 部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强 H3 大盘异质性假设 A股不同市场状态下应切换 TargetA / TargetB 路径 固定 TargetA/B 消融 成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08% 二、特征工程与多模态因子构建（Feature Engineering） 这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。\n因子/模块 实现方式 输出字段 用途 趋势/动量排序层 ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分 factor_score 形成日频候选强度评分，并用于 IC/分组收益验证 量价共振状态层 ma5\u003e= ma20，vol_ma5\u003e=vol_ma20的组合状态 trend_score：0/1/2 判断价格趋势与量能是否同向共振 微观结构信号层 analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列 strong_buy / buy / neutral / sell / strong_sell 用于 09:45 买入确认和开盘卖出风险拦截 极端尾部风险过滤层 正式9:45 crash_filter使用30日窗口，最近15日检查跌幅\u003e4.5%、阴线、成交量\u003e2倍20日均量 crash_filter 剔除近期出现极端放量下跌的高风险行业 !特征工程与多层信号结构](/images/figure_03_feature_architecture.png)\n小结： 我们把信号分成三层：日频趋势负责“先找候选”，开盘八法负责“盘中确认/拦截”，crash_filter 负责“极端风险剔除”。这样做的好处是后面可以逐层拆解，而不是把所有规则混成一个黑箱。\n三、混合回测引擎开发与基准策略落地（Backtesting Engine） 基准策略不是简单的日频调仓，而是同时处理横截面排序和盘中事件的级联式回测。核心组件包括DataManager、Context、order、run_backtest、开盘形态缓存、crash filter缓存、每日净值统计和交易日志输出。 策略路径上，TargetB 更偏09:35趋势路径，TargetA更偏09:45开盘八法确认路径。组合层加入买入成本0.02%、卖出成本0.10%、单行业最大30%、最多持有3个行业等约束。\n指标 Baseline 结果 回测区间 2024-01-01 至 2025-11-28 策略总收益 100.96% 基准收益 33.67% 年化收益 44.20% Sharpe 2.02 最大回撤 -9.24% 交易次数 49 胜率 55.10% Profit Factor 4.70 小结： Baseline 的结果是总收益100.96%、Sharpe2.02、最大回撤-9.24%，显著跑赢基准33.67%。这个结果尚可，但是只看收益回撤依然太局限。所以需要靠消融实验和事件前瞻来做进一步的解释。\n四、控制变量下的消融实验与多维归因（Ablation Study） 这一阶段是项目最关键的归因部分。先独立检验日频趋势因子，结果发现factor_score的5日RankIC为-0.0337，t-stat为-3.03；trend_score的5日RankIC为-0.0347，t-stat为-3.60。这意味着2024-2025年简单追高趋势并不是正alpha，高分更像过热风险。\n因子 1日 Mean IC 3日 Mean IC 5日 Mean IC 5日 t-stat factor_score -0.0097 -0.0231 -0.0337 -3.03 trend_score -0.0204 -0.0335 -0.0347 -3.60 接着做组合层消融：每次只关闭一个模块，观察账户收益和风险指标变化，从而定位模块边际贡献。\n版本 总收益 Sharpe 最大回撤 baseline 100.96% 2.02 -9.24% ablation_no_open8_buy 83.17% 1.80 -11.63% ablation_no_open8_sell 57.26% 1.38 -13.33% ablation_no_open8_all 69.88% 1.46 -16.80% ablation_fixed_targetA 36.36% 1.49 -5.62% ablation_fixed_targetB 73.08% 1.86 -9.92% ablation_no_crash_filter 81.77% 1.69 -13.16% ablation_no_costs 103.93% 2.07 -8.95% 归因结论：关闭open8_sell后，策略总收益由100.96%降至57.26%，说明开盘八法在体系中的核心贡献更偏“风险拦截和退出纪律”；固定TargetA后总收益只剩36.36%，说明大盘模式切换是策略不可忽略的结构性来源。\n小结： 在这里解决了一个悖论：日频趋势IC是负的，但组合还能赚钱。原因是策略并非做高趋势买入，而是靠开盘八法退出、TargetA/B切换和风险过滤，把不利路径挡掉。\n五、显微镜式事件级前瞻分析与悖论解耦（Event Analysis） 我们把每日每个行业在09:35和09:45的信号全部剥离出来，形成8W+行事件级面板。每个事件都记录信号时点、open8形态、是否进入路径候选、是否成为最终入选信号，以及当日和1、3、5日前瞻收益。\n信号 事件数 5日均值 5日胜率 09:35 final_selected 97 2.56% 64.95% 09:45 final_selected 39 3.79% 56.41% 事件级面板里还有一个更有价值的发现：在TargetA量价候选池中，open8买入过滤接受的样本5日收益均值为1.57%，而被拒绝的non-buy样本为5.81%。这不是简单说明open8买入无效，而是说明“硬过滤”会误杀一部分高爆发黑马。\n分组 事件数 5日均值 5日胜率 open8 拒绝 151 5.81% 65.56% open8 接受 221 1.57% 53.39% 因此，open8买入端更合理的定位不是“绝对买入 alpha”，而是“路径平滑约束”。它可能牺牲部分爆发力，但配合open8卖出纪律和持仓席位限制，在组合层改善风险收益。\n小结： 用事件级面板把账户回测拆开看，发现 open8 买入过滤确实存在误杀；所以后续不应该继续把它当一票否决，而应该改成排序惩罚或者风险权重。这个发现反而说明我的研究不是只挑好看的回测，而是在主动拆解策略缺陷。\n六、策略优化变体实验与生产化路线（Optimization \u0026 Roadmap） 基于第五步发现，项目继续做第二轮 open8_buy_variants 实验，测试放宽买入条件、加入 neutral、仅排除 strong_sell、只买 non-buy 等变体，观察收益与风险的变化。\n变体 总收益 Sharpe 最大回撤 交易数 baseline 100.96% 2.02 -9.24% 49 no_open8_buy 83.17% 1.80 -11.63% 52 buy_or_neutral 99.95% 1.99 -9.43% 51 not_strong_sell 83.17% 1.80 -11.63% 52 non_buy_only 66.94% 1.53 -11.08% 48 从结果看，baseline仍略优于buy_or_neutral，但两者非常接近；non_buy_only明显更差。这说明 open8买入过滤不能简单删除，也不应该机械地一票否决，下一步更适合做成排序惩罚项或仓位权重调节项。\n小结： 下一步不该再继续堆规则，而是把硬过滤改成软评分，并做可交易映射：行业指数信号映射到 ETF 或成分股篮子，再补涨跌停、流动性、滑点、冲击成本和容量评估。\n总结 我们通过这个项目大致的证明了：在2024-2025年的快速轮动环境下，日频高趋势更像过热风险；真正带来组合表现的是开盘微观结构、模式切换、卖出纪律和风险过滤的组合。\n",
+  "wordCount" : "275",
+  "inLanguage": "en",
+  "datePublished": "2026-05-23T11:22:48+08:00",
+  "dateModified": "2026-05-23T11:22:48+08:00",
+  "author":{
+    "@type": "Person",
+    "name": "WANGKAN"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "我的量化之路",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "http://localhost:1313/favicon.ico"
+    }
+  }
+}
+</script>
+</head>
+<body id="top">
+    <header class="header">
+    <nav class="header-nav">
+        <div class="logo">
+            <a href="http://localhost:1313/" accesskey="h" title="我的量化之路 (Alt + H)">我的量化之路</a>
+            <div class="logo-switches">
+                <button id="theme-toggle" class="theme-toggle" accesskey="t" title="(Alt + T)" aria-label="Toggle theme">
+                    <svg class="moon" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg class="sun" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <ul id="menu" class="menu">
+            <li>
+                <a href="http://localhost:1313/posts/" title="📝 文章">
+                    <span>📝 文章</span>
+                </a>
+            </li>
+            <li>
+                <a href="http://localhost:1313/search/" title="🔍 搜索">
+                    <span>🔍 搜索</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</header>
+<main class="main">
+
+<article class="post-single">
+  <header class="post-header">
+    <nav class="breadcrumbs" role="navigation" aria-label="Breadcrumb">
+            <a href="/">Home</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="/posts/">Posts</a>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+        <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+</nav>
+    <h1 class="post-title entry-hint-parent">
+      A股行业轮动策略验证项目实现流程与可观察性证据
+    </h1>
+    <div class="post-meta">
+
+<span title='2026-05-23 11:22:48 +0800 CST'>May 23, 2026</span>&nbsp;·&nbsp;<span>2 min</span>&nbsp;·&nbsp;<span>WANGKAN</span>
+
+</div>
+  </header> 
+  <div class="post-content md-content"><h2 id="项目总览">项目总览<a hidden class="anchor" aria-hidden="true" href="#项目总览">#</a></h2>
+<p>这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。
+我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。</p>
+<p><img alt="六步研究闭环与三层策略结构" loading="lazy" src="/images/figure_02_research_hypothesis_canvas.png"></p>
+<h2 id="一量化假设与研究目标设定research-hypothesis">一、量化假设与研究目标设定（Research Hypothesis）<a hidden class="anchor" aria-hidden="true" href="#一量化假设与研究目标设定research-hypothesis">#</a></h2>
+<p>做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。
+研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。</p>
+<table>
+  <thead>
+      <tr>
+          <th>核心假设</th>
+          <th>含义</th>
+          <th>验证方法</th>
+          <th>本版结论</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>H1 日频动量假设</td>
+          <td>factor_score / trend_score 可以筛选潜在强势行业池</td>
+          <td>RankIC、分组收益、多空组合</td>
+          <td>不成立：5日 IC 显著为负，高分更像过热风险</td>
+      </tr>
+      <tr>
+          <td>H2 开盘微观结构假设</td>
+          <td>9:30-9:45 的三根 5分钟K 线排列有短期预测力</td>
+          <td>open8 事件面板、最终入选信号前瞻收益</td>
+          <td>部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强</td>
+      </tr>
+      <tr>
+          <td>H3 大盘异质性假设</td>
+          <td>A股不同市场状态下应切换 TargetA / TargetB 路径</td>
+          <td>固定 TargetA/B 消融</td>
+          <td>成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08%</td>
+      </tr>
+  </tbody>
+</table>
+<p><img alt="研究假设、研究边界与验证方法" loading="lazy" src="/images/figure_02_research_hypothesis_canvas.png"></p>
+<h2 id="二特征工程与多模态因子构建feature-engineering">二、特征工程与多模态因子构建（Feature Engineering）<a hidden class="anchor" aria-hidden="true" href="#二特征工程与多模态因子构建feature-engineering">#</a></h2>
+<p>这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。</p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">因子/模块</th>
+          <th style="text-align: left">实现方式</th>
+          <th style="text-align: left">输出字段</th>
+          <th style="text-align: left">用途</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">趋势/动量排序层</td>
+          <td style="text-align: left">ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分</td>
+          <td style="text-align: left">factor_score</td>
+          <td style="text-align: left">形成日频候选强度评分，并用于 IC/分组收益验证</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">量价共振状态层</td>
+          <td style="text-align: left">ma5&gt;= ma20，vol_ma5&gt;=vol_ma20的组合状态</td>
+          <td style="text-align: left">trend_score：0/1/2</td>
+          <td style="text-align: left">判断价格趋势与量能是否同向共振</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">微观结构信号层</td>
+          <td style="text-align: left">analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列</td>
+          <td style="text-align: left">strong_buy / buy / neutral / sell / strong_sell</td>
+          <td style="text-align: left">用于 09:45 买入确认和开盘卖出风险拦截</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">极端尾部风险过滤层</td>
+          <td style="text-align: left">正式9:45 crash_filter使用30日窗口，最近15日检查跌幅&gt;4.5%、阴线、成交量&gt;2倍20日均量</td>
+          <td style="text-align: left">crash_filter</td>
+          <td style="text-align: left">剔除近期出现极端放量下跌的高风险行业</td>
+      </tr>
+  </tbody>
+</table>
+<p>!特征工程与多层信号结构](/images/figure_03_feature_architecture.png)</p>
+<p><img alt="开盘八法离散形态映射" loading="lazy" src="/images/figure_04_open8_pattern_mapping.png"></p>
+<h4 id="小结">小结：<a hidden class="anchor" aria-hidden="true" href="#小结">#</a></h4>
+<p>我们把信号分成三层：日频趋势负责“先找候选”，开盘八法负责“盘中确认/拦截”，crash_filter 负责“极端风险剔除”。这样做的好处是后面可以逐层拆解，而不是把所有规则混成一个黑箱。</p>
+<h2 id="三混合回测引擎开发与基准策略落地backtesting-engine">三、混合回测引擎开发与基准策略落地（Backtesting Engine）<a hidden class="anchor" aria-hidden="true" href="#三混合回测引擎开发与基准策略落地backtesting-engine">#</a></h2>
+<p>基准策略不是简单的日频调仓，而是同时处理横截面排序和盘中事件的级联式回测。核心组件包括DataManager、Context、order、run_backtest、开盘形态缓存、crash filter缓存、每日净值统计和交易日志输出。
+策略路径上，TargetB 更偏09:35趋势路径，TargetA更偏09:45开盘八法确认路径。组合层加入买入成本0.02%、卖出成本0.10%、单行业最大30%、最多持有3个行业等约束。</p>
+<p><img alt="混合回测引擎的事件流程与组合约束" loading="lazy" src="/images/figure_05_backtest_engine.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">指标</th>
+          <th style="text-align: left">Baseline 结果</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">回测区间</td>
+          <td style="text-align: left">2024-01-01 至 2025-11-28</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">策略总收益</td>
+          <td style="text-align: left">100.96%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">基准收益</td>
+          <td style="text-align: left">33.67%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">年化收益</td>
+          <td style="text-align: left">44.20%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">Sharpe</td>
+          <td style="text-align: left">2.02</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">最大回撤</td>
+          <td style="text-align: left">-9.24%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">交易次数</td>
+          <td style="text-align: left">49</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">胜率</td>
+          <td style="text-align: left">55.10%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">Profit Factor</td>
+          <td style="text-align: left">4.70</td>
+      </tr>
+  </tbody>
+</table>
+<p><img alt="Baseline 策略累计收益相对基准表现" loading="lazy" src="/images/figure_06_baseline_equity.png"></p>
+<h4 id="小结-1">小结：<a hidden class="anchor" aria-hidden="true" href="#小结-1">#</a></h4>
+<p>Baseline 的结果是总收益100.96%、Sharpe2.02、最大回撤-9.24%，显著跑赢基准33.67%。这个结果尚可，但是只看收益回撤依然太局限。所以需要靠消融实验和事件前瞻来做进一步的解释。</p>
+<h2 id="四控制变量下的消融实验与多维归因ablation-study">四、控制变量下的消融实验与多维归因（Ablation Study）<a hidden class="anchor" aria-hidden="true" href="#四控制变量下的消融实验与多维归因ablation-study">#</a></h2>
+<p>这一阶段是项目最关键的归因部分。先独立检验日频趋势因子，结果发现factor_score的5日RankIC为-0.0337，t-stat为-3.03；trend_score的5日RankIC为-0.0347，t-stat为-3.60。这意味着2024-2025年简单追高趋势并不是正alpha，高分更像过热风险。</p>
+<p><img alt="日频趋势因子负 IC：高趋势分数更像过热风险" loading="lazy" src="/images/figure_07_negative_ic_paradox.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">因子</th>
+          <th style="text-align: left">1日 Mean IC</th>
+          <th style="text-align: left">3日 Mean IC</th>
+          <th style="text-align: left">5日 Mean IC</th>
+          <th style="text-align: left">5日 t-stat</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">factor_score</td>
+          <td style="text-align: left">-0.0097</td>
+          <td style="text-align: left">-0.0231</td>
+          <td style="text-align: left">-0.0337</td>
+          <td style="text-align: left">-3.03</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">trend_score</td>
+          <td style="text-align: left">-0.0204</td>
+          <td style="text-align: left">-0.0335</td>
+          <td style="text-align: left">-0.0347</td>
+          <td style="text-align: left">-3.60</td>
+      </tr>
+  </tbody>
+</table>
+<p>接着做组合层消融：每次只关闭一个模块，观察账户收益和风险指标变化，从而定位模块边际贡献。</p>
+<p><img alt="消融实验：关闭不同模块后的总收益对比" loading="lazy" src="/images/figure_08_ablation.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">版本</th>
+          <th style="text-align: left">总收益</th>
+          <th style="text-align: left">Sharpe</th>
+          <th style="text-align: left">最大回撤</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">baseline</td>
+          <td style="text-align: left">100.96%</td>
+          <td style="text-align: left">2.02</td>
+          <td style="text-align: left">-9.24%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_no_open8_buy</td>
+          <td style="text-align: left">83.17%</td>
+          <td style="text-align: left">1.80</td>
+          <td style="text-align: left">-11.63%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_no_open8_sell</td>
+          <td style="text-align: left">57.26%</td>
+          <td style="text-align: left">1.38</td>
+          <td style="text-align: left">-13.33%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_no_open8_all</td>
+          <td style="text-align: left">69.88%</td>
+          <td style="text-align: left">1.46</td>
+          <td style="text-align: left">-16.80%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_fixed_targetA</td>
+          <td style="text-align: left">36.36%</td>
+          <td style="text-align: left">1.49</td>
+          <td style="text-align: left">-5.62%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_fixed_targetB</td>
+          <td style="text-align: left">73.08%</td>
+          <td style="text-align: left">1.86</td>
+          <td style="text-align: left">-9.92%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_no_crash_filter</td>
+          <td style="text-align: left">81.77%</td>
+          <td style="text-align: left">1.69</td>
+          <td style="text-align: left">-13.16%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">ablation_no_costs</td>
+          <td style="text-align: left">103.93%</td>
+          <td style="text-align: left">2.07</td>
+          <td style="text-align: left">-8.95%</td>
+      </tr>
+  </tbody>
+</table>
+<p>归因结论：关闭open8_sell后，策略总收益由100.96%降至57.26%，说明开盘八法在体系中的核心贡献更偏“风险拦截和退出纪律”；固定TargetA后总收益只剩36.36%，说明大盘模式切换是策略不可忽略的结构性来源。</p>
+<h4 id="小结-2">小结：<a hidden class="anchor" aria-hidden="true" href="#小结-2">#</a></h4>
+<p>在这里解决了一个悖论：日频趋势IC是负的，但组合还能赚钱。原因是策略并非做高趋势买入，而是靠开盘八法退出、TargetA/B切换和风险过滤，把不利路径挡掉。</p>
+<h2 id="五显微镜式事件级前瞻分析与悖论解耦event-analysis">五、显微镜式事件级前瞻分析与悖论解耦（Event Analysis）<a hidden class="anchor" aria-hidden="true" href="#五显微镜式事件级前瞻分析与悖论解耦event-analysis">#</a></h2>
+<p>我们把每日每个行业在09:35和09:45的信号全部剥离出来，形成8W+行事件级面板。每个事件都记录信号时点、open8形态、是否进入路径候选、是否成为最终入选信号，以及当日和1、3、5日前瞻收益。</p>
+<p><img alt="最终入选信号的 5 日前瞻收益" loading="lazy" src="/images/figure_09_event_panel_forecast.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">信号</th>
+          <th style="text-align: left">事件数</th>
+          <th style="text-align: left">5日均值</th>
+          <th style="text-align: left">5日胜率</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">09:35 final_selected</td>
+          <td style="text-align: left">97</td>
+          <td style="text-align: left">2.56%</td>
+          <td style="text-align: left">64.95%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">09:45 final_selected</td>
+          <td style="text-align: left">39</td>
+          <td style="text-align: left">3.79%</td>
+          <td style="text-align: left">56.41%</td>
+      </tr>
+  </tbody>
+</table>
+<p>事件级面板里还有一个更有价值的发现：在TargetA量价候选池中，open8买入过滤接受的样本5日收益均值为1.57%，而被拒绝的non-buy样本为5.81%。这不是简单说明open8买入无效，而是说明“硬过滤”会误杀一部分高爆发黑马。</p>
+<p><img alt="TargetA 候选池中的 open8 买入过滤悖论" loading="lazy" src="/images/figure_10_accept_reject_paradox.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">分组</th>
+          <th style="text-align: left">事件数</th>
+          <th style="text-align: left">5日均值</th>
+          <th style="text-align: left">5日胜率</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">open8 拒绝</td>
+          <td style="text-align: left">151</td>
+          <td style="text-align: left">5.81%</td>
+          <td style="text-align: left">65.56%</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">open8 接受</td>
+          <td style="text-align: left">221</td>
+          <td style="text-align: left">1.57%</td>
+          <td style="text-align: left">53.39%</td>
+      </tr>
+  </tbody>
+</table>
+<p>因此，open8买入端更合理的定位不是“绝对买入 alpha”，而是“路径平滑约束”。它可能牺牲部分爆发力，但配合open8卖出纪律和持仓席位限制，在组合层改善风险收益。</p>
+<h4 id="小结-3">小结：<a hidden class="anchor" aria-hidden="true" href="#小结-3">#</a></h4>
+<p>用事件级面板把账户回测拆开看，发现 open8 买入过滤确实存在误杀；所以后续不应该继续把它当一票否决，而应该改成排序惩罚或者风险权重。这个发现反而说明我的研究不是只挑好看的回测，而是在主动拆解策略缺陷。</p>
+<h2 id="六策略优化变体实验与生产化路线optimization--roadmap">六、策略优化变体实验与生产化路线（Optimization &amp; Roadmap）<a hidden class="anchor" aria-hidden="true" href="#六策略优化变体实验与生产化路线optimization--roadmap">#</a></h2>
+<p>基于第五步发现，项目继续做第二轮 open8_buy_variants 实验，测试放宽买入条件、加入 neutral、仅排除 strong_sell、只买 non-buy 等变体，观察收益与风险的变化。</p>
+<p><img alt="open8 买入过滤变体实验" loading="lazy" src="/images/figure_11_variants.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: left">变体</th>
+          <th style="text-align: left">总收益</th>
+          <th style="text-align: left">Sharpe</th>
+          <th style="text-align: left">最大回撤</th>
+          <th style="text-align: left">交易数</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: left">baseline</td>
+          <td style="text-align: left">100.96%</td>
+          <td style="text-align: left">2.02</td>
+          <td style="text-align: left">-9.24%</td>
+          <td style="text-align: left">49</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">no_open8_buy</td>
+          <td style="text-align: left">83.17%</td>
+          <td style="text-align: left">1.80</td>
+          <td style="text-align: left">-11.63%</td>
+          <td style="text-align: left">52</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">buy_or_neutral</td>
+          <td style="text-align: left">99.95%</td>
+          <td style="text-align: left">1.99</td>
+          <td style="text-align: left">-9.43%</td>
+          <td style="text-align: left">51</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">not_strong_sell</td>
+          <td style="text-align: left">83.17%</td>
+          <td style="text-align: left">1.80</td>
+          <td style="text-align: left">-11.63%</td>
+          <td style="text-align: left">52</td>
+      </tr>
+      <tr>
+          <td style="text-align: left">non_buy_only</td>
+          <td style="text-align: left">66.94%</td>
+          <td style="text-align: left">1.53</td>
+          <td style="text-align: left">-11.08%</td>
+          <td style="text-align: left">48</td>
+      </tr>
+  </tbody>
+</table>
+<p>从结果看，baseline仍略优于buy_or_neutral，但两者非常接近；non_buy_only明显更差。这说明 open8买入过滤不能简单删除，也不应该机械地一票否决，下一步更适合做成排序惩罚项或仓位权重调节项。</p>
+<p><img alt="从研究策略走向生产策略的路线" loading="lazy" src="/images/figure_12_roadmap.png"></p>
+<h4 id="小结-4">小结：<a hidden class="anchor" aria-hidden="true" href="#小结-4">#</a></h4>
+<p>下一步不该再继续堆规则，而是把硬过滤改成软评分，并做可交易映射：行业指数信号映射到 ETF 或成分股篮子，再补涨跌停、流动性、滑点、冲击成本和容量评估。</p>
+<h2 id="总结">总结<a hidden class="anchor" aria-hidden="true" href="#总结">#</a></h2>
+<p>我们通过这个项目大致的证明了：在2024-2025年的快速轮动环境下，日频高趋势更像过热风险；真正带来组合表现的是开盘微观结构、模式切换、卖出纪律和风险过滤的组合。</p>
+
+
+  </div>
+
+  <footer class="post-footer">
+    <ul class="post-tags">
+    </ul>
+  </footer>
+</article>
+    </main>
+    
+<footer class="footer">
+        <span>&copy; 2026 <a href="http://localhost:1313/">我的量化之路</a></span> · 
+
+    
+    
+    <span>
+        Powered by
+        <a href="https://gohugo.io/?utm_source=papermod" rel="noopener" target="_blank">Hugo</a> &
+        <a href="https://github.com/adityatelange/hugo-PaperMod/" rel="noopener" target="_blank">PaperMod</a>
+    </span>
+</footer>
+<a href="#top" id="top-link" class="top-link hidden" aria-label="go to top" title="Go to Top (Alt + G)" accesskey="g">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevrons-up">
+        <polyline points="17 11 12 6 7 11"></polyline>
+        <polyline points="17 18 12 13 7 18"></polyline>
+    </svg>
+</a>
+
+<script>
+    let menu = document.getElementById('menu');
+    if (menu) {
+        
+        const scrollPosition = localStorage.getItem("menu-scroll-position");
+        if (scrollPosition) {
+            menu.scrollLeft = parseInt(scrollPosition, 10);
+        }
+        
+        menu.onscroll = function () {
+            localStorage.setItem("menu-scroll-position", menu.scrollLeft);
+        }
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            var id = this.getAttribute("href").substr(1);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
+                    behavior: "smooth"
+                });
+            } else {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
+            }
+            if (id === "top") {
+                history.replaceState(null, null, " ");
+            } else {
+                history.pushState(null, null, `#${id}`);
+            }
+        });
+    });
+
+</script>
+<script>
+    var toplink = document.getElementById("top-link");
+    window.onscroll = function () {
+        const scrollThreshold = window.innerHeight;
+        if (document.body.scrollTop > scrollThreshold || document.documentElement.scrollTop > scrollThreshold) {
+            toplink.classList.remove("hidden");
+        } else {
+            toplink.classList.add("hidden");
+        }
+    };
+
+</script>
+<script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+        const html = document.querySelector("html");
+        if (html.dataset.theme === "dark") {
+            html.dataset.theme = 'light';
+            localStorage.setItem("pref-theme", 'light');
+        } else {
+            html.dataset.theme = 'dark';
+            localStorage.setItem("pref-theme", 'dark');
+        }
+    })
+
+</script>
+<script>
+    document.querySelectorAll('pre > code').forEach((codeblock) => {
+        const container = codeblock.parentNode.parentNode;
+
+        const copybutton = document.createElement('button');
+        copybutton.classList.add('copy-code');
+        copybutton.innerHTML = 'copy';
+
+        function copyingDone() {
+            copybutton.innerHTML = 'copied!';
+            setTimeout(() => {
+                copybutton.innerHTML = 'copy';
+            }, 2000);
+        }
+
+        copybutton.addEventListener('click', (cb) => {
+            if ('clipboard' in navigator) {
+                navigator.clipboard.writeText(codeblock.textContent);
+                copyingDone();
+                return;
+            }
+
+            const range = document.createRange();
+            range.selectNodeContents(codeblock);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            try {
+                document.execCommand('copy');
+                copyingDone();
+            } catch (e) { };
+            selection.removeRange(range);
+        });
+
+        if (container.classList.contains("highlight")) {
+            container.appendChild(copybutton);
+        } else if (container.parentNode.firstChild == container) {
+            
+        } else if (codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.nodeName == "TABLE") {
+            
+            codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.appendChild(copybutton);
+        } else {
+            
+            codeblock.parentNode.appendChild(copybutton);
+        }
+    });
+</script>
+</body>
+
+</html>

@@ -1,0 +1,49 @@
+baseURL = 'https://gsbhx.github.io/'
+locale = 'zh-cn'
+title = '我的量化之路'
+theme = 'PaperMod'
+
+# 开启 Hugo 自带的代码高亮（Chroma）
+pygmentsStyle = "monokai"
+pygmentsCodeFences = true
+pygmentsCodeFencesGuessSyntax = true
+
+[params]
+  # 告诉主题引入我们刚刚写在 static/css/ 目录下的自定义样式
+  custom_css = ["css/custom.css"]
+  env = "production"
+  title = "WANGKAN 的技术随笔"
+  description = "量化开发、高频数据技术笔记"
+  keywords = ["量化交易", "C++", "Go", "Hugo", "AI"]
+  author = "WANGKAN"
+  
+  # 基础样式功能配置
+  defaultTheme = "auto"          # 自动根据系统切换深色/浅色模式
+  disableThemeToggle = false     # 允许右上角手动点击太阳/月亮图标切换
+  ShowReadingTime = true         # 显示文章阅读时间估计
+  ShowShareButtons = false       # 隐藏复杂的国外社交分享按钮
+  ShowCodeCopyButtons = true     # 开启代码块一键复制按钮
+  ShowBreadCrumbs = true         # 开启面包屑导航
+  
+  # 首页大卡片（Profile Mode）设置：非常极客的个人展示页
+  [params.profileMode]
+    enabled = false               # 开启首页大卡片模式
+    # 社交小图标配置
+    [[params.profileMode.buttons]]
+      name = "Github"
+      url = "https://github.com/你的GitHub用户名"
+    [[params.profileMode.buttons]]
+      name = "Posts (文章目录)"
+      url = "/posts"
+
+# 顶部导航栏菜单
+[[menu.main]]
+  name = "📝 文章"
+  url = "/posts/"
+  weight = 10
+[[menu.main]]
+  name = "🔍 搜索"
+  url = "/search/"
+  weight = 20
+
+

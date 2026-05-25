@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en" dir="auto" data-theme="auto">
+
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="robots" content="index, follow">
+<title>A股Level2主题信号策略复现与验证 | 我的量化之路</title>
+<meta name="keywords" content="">
+<meta name="description" content="
+文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。
+
+0. 摘要
+这项研究围绕 A 股短线强势股中的“主题扩散 &#43; 资金承接”现象展开。策略的核心是：
+
+在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？
+
+为回答这个问题，我把候选标的拆成四层信号：
+
+市场层：判断大环境是否允许短线进攻；
+情绪层：判断短线接力是否活跃，亏钱效应是否可控；
+题材层：判断题材是否为主线、是否有扩散和梯队；
+个股层：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。
+
+最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 mode：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。
+当前可复现输出包采用 strict T&#43;1 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。
+
+1. 研究假设：短线收益来自主线扩散与个股承接
+A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。
+
+  
+      
+          层级
+          核心假设
+          可观察证据
+          主要风险
+      
+  
+  
+      
+          市场层
+          指数和市场状态决定能否进攻
+          指数强弱、成交环境、风险偏好、市场状态
+          弱市强票容易冲高回落，仓位需要压缩
+      
+      
+          情绪层
+          短线情绪影响接力成功率
+          涨停扩散、连板高度、炸板修复、亏钱效应
+          情绪退潮时同样形态的成功率下降
+      
+      
+          题材层
+          主线题材提供资金聚集方向
+          题材宽度、梯队、多板数量、核心标的带动
+          非主线题材容易一日游
+      
+      
+          个股层
+          Level2 承接确认买点质量
+          竞价金额、开盘承接、盘口失衡、结构突破
+          假突破、低开下杀、盘口衰竭导致亏损
+      
+  
+
+这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：
+
+市场和情绪决定风险预算；
+题材决定资金方向；
+个股 Level2 决定是否真的有承接；
+交易层再把信号转化为仓位、买入、减仓和退出。
+
+
+2. 数据工程与可见性边界
+策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。">
+<meta name="author" content="WANGKAN">
+<link rel="canonical" href="http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.cd9298b33628769aa1bc1acebbbfd7aa11ce81dfe03484d479e1907760249a1d.css" integrity="sha256-zZKYszYodpqhvBrOu7/XqhHOgd/gNITUeeGQd2Akmh0=" rel="preload stylesheet" as="style">
+<link rel="icon" href="http://localhost:1313/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
+<link rel="apple-touch-icon" href="http://localhost:1313/apple-touch-icon.png">
+<link rel="mask-icon" href="http://localhost:1313/safari-pinned-tab.svg">
+<meta name="theme-color" content="#2e2e33">
+<meta name="msapplication-TileColor" content="#2e2e33">
+<link rel="alternate" hreflang="en" href="http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/">
+<noscript>
+    <style>
+        #theme-toggle,
+        .top-link {
+            display: none;
+        }
+
+    </style>
+    <style>
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --theme: rgb(29, 30, 32);
+                --entry: rgb(46, 46, 51);
+                --primary: rgb(218, 218, 219);
+                --secondary: rgb(155, 156, 157);
+                --tertiary: rgb(65, 66, 68);
+                --content: rgb(196, 196, 197);
+                --code-block-bg: rgb(46, 46, 51);
+                --code-bg: rgb(55, 56, 62);
+                --border: rgb(51, 51, 51);
+                color-scheme: dark;
+            }
+
+            .list {
+                background: var(--theme);
+            }
+
+            .toc {
+                background: var(--entry);
+            }
+        }
+
+    </style>
+</noscript>
+<script>
+    if (localStorage.getItem("pref-theme") === "dark") {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else if (localStorage.getItem("pref-theme") === "light") {
+       document.querySelector("html").dataset.theme = 'light';
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else {
+        document.querySelector("html").dataset.theme = 'light';
+    }
+
+</script><meta property="og:url" content="http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/">
+  <meta property="og:site_name" content="我的量化之路">
+  <meta property="og:title" content="A股Level2主题信号策略复现与验证">
+  <meta property="og:description" content="文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。
+0. 摘要 这项研究围绕 A 股短线强势股中的“主题扩散 &#43; 资金承接”现象展开。策略的核心是：
+在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？
+为回答这个问题，我把候选标的拆成四层信号：
+市场层：判断大环境是否允许短线进攻； 情绪层：判断短线接力是否活跃，亏钱效应是否可控； 题材层：判断题材是否为主线、是否有扩散和梯队； 个股层：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。 最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 mode：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。
+当前可复现输出包采用 strict T&#43;1 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。
+1. 研究假设：短线收益来自主线扩散与个股承接 A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。
+层级 核心假设 可观察证据 主要风险 市场层 指数和市场状态决定能否进攻 指数强弱、成交环境、风险偏好、市场状态 弱市强票容易冲高回落，仓位需要压缩 情绪层 短线情绪影响接力成功率 涨停扩散、连板高度、炸板修复、亏钱效应 情绪退潮时同样形态的成功率下降 题材层 主线题材提供资金聚集方向 题材宽度、梯队、多板数量、核心标的带动 非主线题材容易一日游 个股层 Level2 承接确认买点质量 竞价金额、开盘承接、盘口失衡、结构突破 假突破、低开下杀、盘口衰竭导致亏损 这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：
+市场和情绪决定风险预算； 题材决定资金方向； 个股 Level2 决定是否真的有承接； 交易层再把信号转化为仓位、买入、减仓和退出。 2. 数据工程与可见性边界 策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。">
+  <meta property="og:locale" content="zh_cn">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="posts">
+    <meta property="article:published_time" content="2026-05-23T11:22:48+08:00">
+    <meta property="article:modified_time" content="2026-05-23T11:22:48+08:00">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="A股Level2主题信号策略复现与验证">
+  <meta name="twitter:description" content="文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。
+0. 摘要 这项研究围绕 A 股短线强势股中的“主题扩散 &#43; 资金承接”现象展开。策略的核心是：
+在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？
+为回答这个问题，我把候选标的拆成四层信号：
+市场层：判断大环境是否允许短线进攻； 情绪层：判断短线接力是否活跃，亏钱效应是否可控； 题材层：判断题材是否为主线、是否有扩散和梯队； 个股层：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。 最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 mode：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。
+当前可复现输出包采用 strict T&#43;1 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。
+1. 研究假设：短线收益来自主线扩散与个股承接 A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。
+层级 核心假设 可观察证据 主要风险 市场层 指数和市场状态决定能否进攻 指数强弱、成交环境、风险偏好、市场状态 弱市强票容易冲高回落，仓位需要压缩 情绪层 短线情绪影响接力成功率 涨停扩散、连板高度、炸板修复、亏钱效应 情绪退潮时同样形态的成功率下降 题材层 主线题材提供资金聚集方向 题材宽度、梯队、多板数量、核心标的带动 非主线题材容易一日游 个股层 Level2 承接确认买点质量 竞价金额、开盘承接、盘口失衡、结构突破 假突破、低开下杀、盘口衰竭导致亏损 这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：
+市场和情绪决定风险预算； 题材决定资金方向； 个股 Level2 决定是否真的有承接； 交易层再把信号转化为仓位、买入、减仓和退出。 2. 数据工程与可见性边界 策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。">
+
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "Posts",
+      "item": "http://localhost:1313/posts/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  2 ,
+      "name": "A股Level2主题信号策略复现与验证",
+      "item": "http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/"
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "A股Level2主题信号策略复现与验证",
+  "name": "A股Level2主题信号策略复现与验证",
+  "description": " 文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。\n0. 摘要 这项研究围绕 A 股短线强势股中的“主题扩散 + 资金承接”现象展开。策略的核心是：\n在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？\n为回答这个问题，我把候选标的拆成四层信号：\n市场层：判断大环境是否允许短线进攻； 情绪层：判断短线接力是否活跃，亏钱效应是否可控； 题材层：判断题材是否为主线、是否有扩散和梯队； 个股层：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。 最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 mode：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。\n当前可复现输出包采用 strict T+1 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。\n1. 研究假设：短线收益来自主线扩散与个股承接 A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。\n层级 核心假设 可观察证据 主要风险 市场层 指数和市场状态决定能否进攻 指数强弱、成交环境、风险偏好、市场状态 弱市强票容易冲高回落，仓位需要压缩 情绪层 短线情绪影响接力成功率 涨停扩散、连板高度、炸板修复、亏钱效应 情绪退潮时同样形态的成功率下降 题材层 主线题材提供资金聚集方向 题材宽度、梯队、多板数量、核心标的带动 非主线题材容易一日游 个股层 Level2 承接确认买点质量 竞价金额、开盘承接、盘口失衡、结构突破 假突破、低开下杀、盘口衰竭导致亏损 这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：\n市场和情绪决定风险预算； 题材决定资金方向； 个股 Level2 决定是否真的有承接； 交易层再把信号转化为仓位、买入、减仓和退出。 2. 数据工程与可见性边界 策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。\n",
+  "keywords": [
+    
+  ],
+  "articleBody": " 文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。\n0. 摘要 这项研究围绕 A 股短线强势股中的“主题扩散 + 资金承接”现象展开。策略的核心是：\n在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？\n为回答这个问题，我把候选标的拆成四层信号：\n市场层：判断大环境是否允许短线进攻； 情绪层：判断短线接力是否活跃，亏钱效应是否可控； 题材层：判断题材是否为主线、是否有扩散和梯队； 个股层：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。 最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 mode：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。\n当前可复现输出包采用 strict T+1 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。\n1. 研究假设：短线收益来自主线扩散与个股承接 A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。\n层级 核心假设 可观察证据 主要风险 市场层 指数和市场状态决定能否进攻 指数强弱、成交环境、风险偏好、市场状态 弱市强票容易冲高回落，仓位需要压缩 情绪层 短线情绪影响接力成功率 涨停扩散、连板高度、炸板修复、亏钱效应 情绪退潮时同样形态的成功率下降 题材层 主线题材提供资金聚集方向 题材宽度、梯队、多板数量、核心标的带动 非主线题材容易一日游 个股层 Level2 承接确认买点质量 竞价金额、开盘承接、盘口失衡、结构突破 假突破、低开下杀、盘口衰竭导致亏损 这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：\n市场和情绪决定风险预算； 题材决定资金方向； 个股 Level2 决定是否真的有承接； 交易层再把信号转化为仓位、买入、减仓和退出。 2. 数据工程与可见性边界 策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。\n数据类型 主要内容 用途 可见性约束 市场与指数 指数涨跌、风险偏好、成交环境、市场状态 判断是否允许开仓 只能使用决策点前的信息 情绪数据 涨停、连板、炸板、亏钱效应 判断短线接力环境 不得使用收盘后结果倒推早盘买点 题材数据 题材分类、主线宽度、梯队、核心身份 识别主线题材和扩散程度 题材归因必须能回放到当日可见状态 个股行情 竞价、开盘、分时、突破、低开、回封 构建买点与持仓判断 买点只使用当刻或之前数据 Level2 快照 委托簿、主动买卖、盘口失衡、承接强弱 确认买入质量和卖点风险 必须记录最早可见时间戳 回测输出 交易记录、资金曲线、诊断报告 验证收益、回撤和归因 只用于复盘，不回灌当日决策 未来函数约束是这类策略的底线：买入当天不能用买点之后的盘口结果，T+1 卖点不能用收盘后才知道的收益结果，盘中代理指标只能作为研究探针，不能直接改写默认收益解释。\n3. 系统框架：四大拼图、模式评估与 T+1 生命周期 系统整体架构如下：\n候选股票首先进入四层画像：\nEnvironment：市场状态、交易模式、环境倍率和允许模式； Emotion / Absorption：情绪分、开盘执行分、承接分； Theme：题材排名、主线强度、题材宽度、梯队和开盘攻击； Stock：身份分、结构分、盘口执行质量。 四层画像之后，系统进入 mode1 ~ mode6 的并行评估。每个模式代表一种不同强势结构：龙头分歧转一致、题材共振核心、分歧转强、结构突破、个股先发突破、主线突破承接。仲裁层根据模式原始分、环境倍率、模式惩罚 / 奖励和题材开盘攻击加分生成 FinalScore，并输出 strong_buy / watch / skip。\n最后进入 Phase3 交易生命周期：\nSignalDecision -\u003e TradePlan -\u003e TradeExecution -\u003e TradeResult 默认收益口径是 strict T+1：当日只买不卖，次日如果不及预期或低开下杀先减仓，剩余仓位用动态止损和时间衰减管理。盘中 intraday_proxy 只用于研究当天失败结构，不作为默认收益口径。\n4. 策略模式：不用一套阈值解释所有强势股 不同强势股的成功路径不同，因此系统没有用同一个阈值解释所有样本，而是拆成多个模式。\n模式 结构含义 验证重点 当前研究定位 mode1 龙头分歧转一致 龙头身份、前一日分歧背景、早盘买盘确认 当前样本中交易数为 0，不是收益主来源 mode2 题材共振核心 题材宽度、前排集中度、盘口确认 胜率较高，是稳定收益来源之一 mode3 分歧转强 / 回封 释放压力后是否重新承接 有修复价值，但需要防止晚确认和追高 mode4 结构突破 箱体、压力位、放量和早盘健康盘口 样本较少，更多是补充结构 mode5 个股先发突破 / 趋势主升 个股先于题材，结构先于共振 当前最主要收益贡献来源 mode6 主线突破承接 D-1 压力突破 + D0 早盘确认 样本少但单笔收益较强 这个设计的价值在于：如果一个样本失败，复盘时能追溯它是模式失败、环境失败、题材失败、结构失败，还是卖出纪律失败，而不是只得到一个“模型错了”的黑箱结论。\n5. 回测口径与 Baseline 表现 当前文中展示的是可复现 regenerated output：\n指标 数值 回测区间 2024-07-01 ~ 2026-04-30 交易笔数 99 胜率 65.7% 平均单笔净收益 5.1% 中位单笔净收益 3.9% 总收益 156.8% 最大回撤 9.6% Profit Factor 4.28 平均持仓天数 2.28 成本 / 滑点 2 bps / 10 bps 从净值和回撤看，策略的收益并不是均匀线性增长，而是与市场阶段和题材扩散阶段高度相关。2025H2 的表现明显更好，而 2026 年前四个月在较少交易数下仍保持正收益。\n窗口 用途 交易数 胜率 平均净收益 总收益 最大回撤 2025H1 baseline tuning 21 61.9% 4.2% 15.9% 6.2% 2025H2 holdout backtest 34 76.5% 6.7% 52.8% 0.6% 2026_01_04 out-of-sample 14 71.4% 4.1% 10.8% 0.5% 6. 收益归因：主要来自 mode5、mode6 和 mode2 只展示一条净值曲线是不够的。更重要的问题是：收益来自哪里？\n模式 交易数 胜率 平均净收益 贡献占比 mode2 11 81.8% 9.1% 20.0% mode3 19 52.6% 2.3% 8.8% mode4 7 42.9% 1.5% 2.1% mode5 50 68.0% 4.7% 47.1% mode6 12 75.0% 9.2% 22.1% 从贡献看，收益主要来自三条路径：\nmode5 个股先发突破：贡献约 47.1%，是最主要收益来源； mode6 主线突破承接：贡献约 22.1%，交易数较少但单笔收益较强； mode2 题材共振核心：贡献约 20.0%，胜率最高。 这说明策略不是靠所有规则平均赚钱，而是靠“个股先发 + 主线承接 + 共振核心”三类结构承担主要收益。mode3 和 mode4 更像补充模式，它们的存在有助于覆盖部分修复和结构突破样本，但不是主收益引擎。\n7. 退出归因：强势延续与失败桶分离 买点只是策略的一半。A 股 T+1 的难点在于：当天买入后不能卖出，次日如果预期落空，需要决定是减仓、止损、等待修复还是时间衰减。\n从退出原因看，time_decay 是主要盈利退出，48 笔交易胜率 100%，平均单笔净收益约 12.1%。这说明正常强势延续样本并不需要过早卖出，时间衰减本身就是强票退出的一部分。\n相反，亏损主要集中在两个失败桶：\nday2_expectation_reduce + day2_close_exit：10 笔，胜率 0%，平均净收益约 -10.6%； mode5_low_open_breakout_reduce + dynamic_stop：12 笔，胜率 16.7%，平均净收益约 -1.5%。 这个归因说明，失败不是随机分布的，而是集中在“次日不及预期”和“独立突破后的低开失败”这两类路径上。后续优化不应该盲目扩大卖点，而应该围绕这些重复失败桶继续做条件拆分。\n8. 因子分桶：承接、结构、最终分与入场时间 因子不是因为看起来合理就有效。每个因子都要接受分桶、跨窗口和消融检验。\n承接分和结构分的分桶结果显示，中高分桶整体优于低分桶，但最高分桶并不总是最优。这一点很重要：它说明强因子不是越极端越好，过高的承接或结构可能也包含“情绪释放末端”或“过度延伸”的成分。\n入场时间的分桶更符合直觉：更靠近开盘的确认样本收益更高，09:41~10:00 的样本表现明显变弱。这支持一个交易原则：短线强势股的有效买点应尽量贴近早盘真实确认，而不是等到情绪已经释放完成后再追。\n9. mode5 与 mode6 的专项验证 9.1 mode5：个股先于题材的 stock-first 假设 mode5 的核心假设是：当个股结构和盘口足够强时，即使题材共振还不充分，也可能出现“个股先于题材”的独立突破。\n在当前样本里，“强结构 + 强盘口 + 弱题材”的 mode5 样本表现好于“强结构 + 强盘口 + 强题材”分组，说明 stock-first 逻辑在当前窗口内具备一定解释力。不过，“弱结构 + 强盘口 + 弱题材”分组平均收益也不低，这提示 mode5 的真实收益来源可能不只是结构，还包含早盘盘口和身份特征。后续需要继续用更严格消融确认结构因子的边际贡献。\n9.2 mode6：D-1 突破与 D0 早盘承接 mode6 的核心假设是：前一日完成主线压力突破，次日早盘仍有可见承接，可能形成可执行的主线延续买点。\n当前 D-1 突破 + D0 确认 分组交易数 22，胜率约 72.7%，平均单笔净收益约 8.8%。不过，对照组样本较少或为空，说明当前 mode6 的负样本对照还不完整。它可以作为执行大桶继续观察，但还不能把全部结论建立在单一分组上。\n10. 证伪状态：已经做了什么，还差什么 当前版本已经完成：\nStrict T+1口径下的可复现回测； mode 级收益归因； 退出原因归因； 承接分、结构分、入场时间等分桶观察； mode5 / mode6 专项分组验证； 执行可行性初步诊断。 但还有几类证据不能过度包装：\n模块 当前状态 解释 真实模块消融 待补跑 no_environment_gate、no_absorption_score、no_mode5 等尚未真实重跑 事件级前瞻 面板已建，但覆盖不足 1D/2D/3D 前瞻主要覆盖少量事件，5D 前瞻为空 成本敏感性 不完整 当前只展示 2 bps 成本和 10 bps 滑点，高滑点版本待补 基准净值 暂缺 当前输出包没有 benchmark_nav，无法画策略 vs 指数基准 99 笔 vs 94 笔口径 需要补齐 regenerated output 与 accepted benchmark 口径不同，需要单独 reconciliate 因此，本文的结论应理解为：当前系统具备可解释的收益来源和初步证伪框架，但还没有完成最终生产级因子证伪。真正的最终版还需要补跑模块级消融、完整事件级前瞻和成本敏感性。\n11. 风险归因与反过拟合纪律 这类策略最大的风险是把某个局部窗口的规则误认为普遍有效。因此我把规则迭代分成三类：\n可上线规则：跨窗口稳定、消融有效、不会误伤主路径； 诊断标签：能解释失败，但暂时不能直接参与买卖； 纸面观察规则：局部有效但样本少，只记录不执行。 几个反过拟合原则：\n新规则不能只因为单票或单月好看就晋级； 如果放宽阈值后样本变多但误伤赢家增加，优先拒绝； 价格弱或盘口弱不能单独构成卖点，必须结合市场、题材、个股上下文； 所有新增规则都必须说明最早可见时点； intraday_proxy 只能用于诊断失败结构，不能替代 S trict T+1 收益口径。 12. 后续计划 下一阶段的工作不是继续堆规则，而是补齐证据链：\n补真实消融：优先补 no_environment_gate、no_absorption_score、no_theme_layer、no_mode5、no_mode6； 补事件级前瞻：对全部候选补齐 1/2/3/5 日前瞻收益、MFE 和 MAE； 补成本敏感性：跑 20/30/50 bps 高滑点场景； 补 benchmark_nav：加入中证1000、万得全A或自定义短线情绪基准； 统一口径：明确 99 笔 regenerated output 与 94 笔 accepted benchmark 的差异； 继续 paper trial：新规则只先进入纸面观察，不直接进入默认 baseline。 13. 结语 从当前结果看，收益主要来自 mode5 的个股先发突破、mode6 的主线突破承接和 mode2 的题材共振核心；亏损则集中在次日不及预期和低开失败等重复失败桶。这个结构说明，系统的下一步优化不应该是大范围扩展规则，而应该继续围绕少数稳定失败链做严格验证。\n对我来说，一个策略是否值得继续研究，不取决于它是否在某段历史中收益最高，而取决于：\n它的信号来源是否可解释； 它的收益来源是否能拆解； 它的失败样本是否可归因； 它的因子是否经得起证伪； 它是否能在真实交易约束下仍然成立。 这也是这个 Level2 主题信号系统后续迭代的核心方向。\n",
+  "wordCount" : "511",
+  "inLanguage": "en",
+  "datePublished": "2026-05-23T11:22:48+08:00",
+  "dateModified": "2026-05-23T11:22:48+08:00",
+  "author":{
+    "@type": "Person",
+    "name": "WANGKAN"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "我的量化之路",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "http://localhost:1313/favicon.ico"
+    }
+  }
+}
+</script>
+</head>
+<body id="top">
+    <header class="header">
+    <nav class="header-nav">
+        <div class="logo">
+            <a href="http://localhost:1313/" accesskey="h" title="我的量化之路 (Alt + H)">我的量化之路</a>
+            <div class="logo-switches">
+                <button id="theme-toggle" class="theme-toggle" accesskey="t" title="(Alt + T)" aria-label="Toggle theme">
+                    <svg class="moon" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg class="sun" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <ul id="menu" class="menu">
+            <li>
+                <a href="http://localhost:1313/posts/" title="📝 文章">
+                    <span>📝 文章</span>
+                </a>
+            </li>
+            <li>
+                <a href="http://localhost:1313/search/" title="🔍 搜索">
+                    <span>🔍 搜索</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</header>
+<main class="main">
+
+<article class="post-single">
+  <header class="post-header">
+    <nav class="breadcrumbs" role="navigation" aria-label="Breadcrumb">
+            <a href="/">Home</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="/posts/">Posts</a>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+        <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+</nav>
+    <h1 class="post-title entry-hint-parent">
+      A股Level2主题信号策略复现与验证
+    </h1>
+    <div class="post-meta">
+
+<span title='2026-05-23 11:22:48 +0800 CST'>May 23, 2026</span>&nbsp;·&nbsp;<span>3 min</span>&nbsp;·&nbsp;<span>WANGKAN</span>
+
+</div>
+  </header> 
+  <div class="post-content md-content"><blockquote>
+<p>文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。</p>
+</blockquote>
+<h2 id="0-摘要">0. 摘要<a hidden class="anchor" aria-hidden="true" href="#0-摘要">#</a></h2>
+<p>这项研究围绕 A 股短线强势股中的“主题扩散 + 资金承接”现象展开。策略的核心是：</p>
+<blockquote>
+<p>在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？</p>
+</blockquote>
+<p>为回答这个问题，我把候选标的拆成四层信号：</p>
+<ol>
+<li><strong>市场层</strong>：判断大环境是否允许短线进攻；</li>
+<li><strong>情绪层</strong>：判断短线接力是否活跃，亏钱效应是否可控；</li>
+<li><strong>题材层</strong>：判断题材是否为主线、是否有扩散和梯队；</li>
+<li><strong>个股层</strong>：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。</li>
+</ol>
+<p>最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 <code>mode</code>：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。</p>
+<p>当前可复现输出包采用 <strong>strict T+1</strong> 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。</p>
+<hr>
+<h2 id="1-研究假设短线收益来自主线扩散与个股承接">1. 研究假设：短线收益来自主线扩散与个股承接<a hidden class="anchor" aria-hidden="true" href="#1-研究假设短线收益来自主线扩散与个股承接">#</a></h2>
+<p>A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。</p>
+<table>
+  <thead>
+      <tr>
+          <th>层级</th>
+          <th>核心假设</th>
+          <th>可观察证据</th>
+          <th>主要风险</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>市场层</td>
+          <td>指数和市场状态决定能否进攻</td>
+          <td>指数强弱、成交环境、风险偏好、市场状态</td>
+          <td>弱市强票容易冲高回落，仓位需要压缩</td>
+      </tr>
+      <tr>
+          <td>情绪层</td>
+          <td>短线情绪影响接力成功率</td>
+          <td>涨停扩散、连板高度、炸板修复、亏钱效应</td>
+          <td>情绪退潮时同样形态的成功率下降</td>
+      </tr>
+      <tr>
+          <td>题材层</td>
+          <td>主线题材提供资金聚集方向</td>
+          <td>题材宽度、梯队、多板数量、核心标的带动</td>
+          <td>非主线题材容易一日游</td>
+      </tr>
+      <tr>
+          <td>个股层</td>
+          <td>Level2 承接确认买点质量</td>
+          <td>竞价金额、开盘承接、盘口失衡、结构突破</td>
+          <td>假突破、低开下杀、盘口衰竭导致亏损</td>
+      </tr>
+  </tbody>
+</table>
+<p>这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：</p>
+<ul>
+<li>市场和情绪决定风险预算；</li>
+<li>题材决定资金方向；</li>
+<li>个股 Level2 决定是否真的有承接；</li>
+<li>交易层再把信号转化为仓位、买入、减仓和退出。</li>
+</ul>
+<hr>
+<h2 id="2-数据工程与可见性边界">2. 数据工程与可见性边界<a hidden class="anchor" aria-hidden="true" href="#2-数据工程与可见性边界">#</a></h2>
+<p>策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。</p>
+<table>
+  <thead>
+      <tr>
+          <th>数据类型</th>
+          <th>主要内容</th>
+          <th>用途</th>
+          <th>可见性约束</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>市场与指数</td>
+          <td>指数涨跌、风险偏好、成交环境、市场状态</td>
+          <td>判断是否允许开仓</td>
+          <td>只能使用决策点前的信息</td>
+      </tr>
+      <tr>
+          <td>情绪数据</td>
+          <td>涨停、连板、炸板、亏钱效应</td>
+          <td>判断短线接力环境</td>
+          <td>不得使用收盘后结果倒推早盘买点</td>
+      </tr>
+      <tr>
+          <td>题材数据</td>
+          <td>题材分类、主线宽度、梯队、核心身份</td>
+          <td>识别主线题材和扩散程度</td>
+          <td>题材归因必须能回放到当日可见状态</td>
+      </tr>
+      <tr>
+          <td>个股行情</td>
+          <td>竞价、开盘、分时、突破、低开、回封</td>
+          <td>构建买点与持仓判断</td>
+          <td>买点只使用当刻或之前数据</td>
+      </tr>
+      <tr>
+          <td>Level2 快照</td>
+          <td>委托簿、主动买卖、盘口失衡、承接强弱</td>
+          <td>确认买入质量和卖点风险</td>
+          <td>必须记录最早可见时间戳</td>
+      </tr>
+      <tr>
+          <td>回测输出</td>
+          <td>交易记录、资金曲线、诊断报告</td>
+          <td>验证收益、回撤和归因</td>
+          <td>只用于复盘，不回灌当日决策</td>
+      </tr>
+  </tbody>
+</table>
+<p>未来函数约束是这类策略的底线：买入当天不能用买点之后的盘口结果，T+1 卖点不能用收盘后才知道的收益结果，盘中代理指标只能作为研究探针，不能直接改写默认收益解释。</p>
+<hr>
+<h2 id="3-系统框架四大拼图模式评估与-t1-生命周期">3. 系统框架：四大拼图、模式评估与 T+1 生命周期<a hidden class="anchor" aria-hidden="true" href="#3-系统框架四大拼图模式评估与-t1-生命周期">#</a></h2>
+<p>系统整体架构如下：</p>
+<p><img alt="系统架构图" loading="lazy" src="/images/level2_assets/level2engines_architecture_interview.svg"></p>
+<p>候选股票首先进入四层画像：</p>
+<ul>
+<li><code>Environment</code>：市场状态、交易模式、环境倍率和允许模式；</li>
+<li><code>Emotion / Absorption</code>：情绪分、开盘执行分、承接分；</li>
+<li><code>Theme</code>：题材排名、主线强度、题材宽度、梯队和开盘攻击；</li>
+<li><code>Stock</code>：身份分、结构分、盘口执行质量。</li>
+</ul>
+<p>四层画像之后，系统进入 <code>mode1 ~ mode6</code> 的并行评估。每个模式代表一种不同强势结构：龙头分歧转一致、题材共振核心、分歧转强、结构突破、个股先发突破、主线突破承接。仲裁层根据模式原始分、环境倍率、模式惩罚 / 奖励和题材开盘攻击加分生成 <code>FinalScore</code>，并输出 <code>strong_buy / watch / skip</code>。</p>
+<p>最后进入 Phase3 交易生命周期：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>SignalDecision -&gt; TradePlan -&gt; TradeExecution -&gt; TradeResult
+</span></span></code></pre></div><p>默认收益口径是 strict T+1：当日只买不卖，次日如果不及预期或低开下杀先减仓，剩余仓位用动态止损和时间衰减管理。盘中 <code>intraday_proxy</code> 只用于研究当天失败结构，不作为默认收益口径。</p>
+<hr>
+<h2 id="4-策略模式不用一套阈值解释所有强势股">4. 策略模式：不用一套阈值解释所有强势股<a hidden class="anchor" aria-hidden="true" href="#4-策略模式不用一套阈值解释所有强势股">#</a></h2>
+<p>不同强势股的成功路径不同，因此系统没有用同一个阈值解释所有样本，而是拆成多个模式。</p>
+<table>
+  <thead>
+      <tr>
+          <th>模式</th>
+          <th>结构含义</th>
+          <th>验证重点</th>
+          <th>当前研究定位</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>mode1</td>
+          <td>龙头分歧转一致</td>
+          <td>龙头身份、前一日分歧背景、早盘买盘确认</td>
+          <td>当前样本中交易数为 0，不是收益主来源</td>
+      </tr>
+      <tr>
+          <td>mode2</td>
+          <td>题材共振核心</td>
+          <td>题材宽度、前排集中度、盘口确认</td>
+          <td>胜率较高，是稳定收益来源之一</td>
+      </tr>
+      <tr>
+          <td>mode3</td>
+          <td>分歧转强 / 回封</td>
+          <td>释放压力后是否重新承接</td>
+          <td>有修复价值，但需要防止晚确认和追高</td>
+      </tr>
+      <tr>
+          <td>mode4</td>
+          <td>结构突破</td>
+          <td>箱体、压力位、放量和早盘健康盘口</td>
+          <td>样本较少，更多是补充结构</td>
+      </tr>
+      <tr>
+          <td>mode5</td>
+          <td>个股先发突破 / 趋势主升</td>
+          <td>个股先于题材，结构先于共振</td>
+          <td>当前最主要收益贡献来源</td>
+      </tr>
+      <tr>
+          <td>mode6</td>
+          <td>主线突破承接</td>
+          <td>D-1 压力突破 + D0 早盘确认</td>
+          <td>样本少但单笔收益较强</td>
+      </tr>
+  </tbody>
+</table>
+<p>这个设计的价值在于：如果一个样本失败，复盘时能追溯它是模式失败、环境失败、题材失败、结构失败，还是卖出纪律失败，而不是只得到一个“模型错了”的黑箱结论。</p>
+<hr>
+<h2 id="5-回测口径与-baseline-表现">5. 回测口径与 Baseline 表现<a hidden class="anchor" aria-hidden="true" href="#5-回测口径与-baseline-表现">#</a></h2>
+<p>当前文中展示的是可复现 regenerated output：</p>
+<table>
+  <thead>
+      <tr>
+          <th>指标</th>
+          <th style="text-align: right">数值</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>回测区间</td>
+          <td style="text-align: right">2024-07-01 ~ 2026-04-30</td>
+      </tr>
+      <tr>
+          <td>交易笔数</td>
+          <td style="text-align: right">99</td>
+      </tr>
+      <tr>
+          <td>胜率</td>
+          <td style="text-align: right">65.7%</td>
+      </tr>
+      <tr>
+          <td>平均单笔净收益</td>
+          <td style="text-align: right">5.1%</td>
+      </tr>
+      <tr>
+          <td>中位单笔净收益</td>
+          <td style="text-align: right">3.9%</td>
+      </tr>
+      <tr>
+          <td>总收益</td>
+          <td style="text-align: right">156.8%</td>
+      </tr>
+      <tr>
+          <td>最大回撤</td>
+          <td style="text-align: right">9.6%</td>
+      </tr>
+      <tr>
+          <td>Profit Factor</td>
+          <td style="text-align: right">4.28</td>
+      </tr>
+      <tr>
+          <td>平均持仓天数</td>
+          <td style="text-align: right">2.28</td>
+      </tr>
+      <tr>
+          <td>成本 / 滑点</td>
+          <td style="text-align: right">2 bps / 10 bps</td>
+      </tr>
+  </tbody>
+</table>
+<p><img alt="策略净值曲线" loading="lazy" src="/images/level2_assets/01_equity_curve_cn.png"></p>
+<p><img alt="策略回撤曲线" loading="lazy" src="/images/level2_assets/02_drawdown_curve_cn.png"></p>
+<p>从净值和回撤看，策略的收益并不是均匀线性增长，而是与市场阶段和题材扩散阶段高度相关。2025H2 的表现明显更好，而 2026 年前四个月在较少交易数下仍保持正收益。</p>
+<p><img alt="跨窗口总收益" loading="lazy" src="/images/level2_assets/03_window_total_return_cn.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th>窗口</th>
+          <th>用途</th>
+          <th style="text-align: right">交易数</th>
+          <th style="text-align: right">胜率</th>
+          <th style="text-align: right">平均净收益</th>
+          <th style="text-align: right">总收益</th>
+          <th style="text-align: right">最大回撤</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>2025H1</td>
+          <td>baseline tuning</td>
+          <td style="text-align: right">21</td>
+          <td style="text-align: right">61.9%</td>
+          <td style="text-align: right">4.2%</td>
+          <td style="text-align: right">15.9%</td>
+          <td style="text-align: right">6.2%</td>
+      </tr>
+      <tr>
+          <td>2025H2</td>
+          <td>holdout backtest</td>
+          <td style="text-align: right">34</td>
+          <td style="text-align: right">76.5%</td>
+          <td style="text-align: right">6.7%</td>
+          <td style="text-align: right">52.8%</td>
+          <td style="text-align: right">0.6%</td>
+      </tr>
+      <tr>
+          <td>2026_01_04</td>
+          <td>out-of-sample</td>
+          <td style="text-align: right">14</td>
+          <td style="text-align: right">71.4%</td>
+          <td style="text-align: right">4.1%</td>
+          <td style="text-align: right">10.8%</td>
+          <td style="text-align: right">0.5%</td>
+      </tr>
+  </tbody>
+</table>
+<hr>
+<h2 id="6-收益归因主要来自-mode5mode6-和-mode2">6. 收益归因：主要来自 mode5、mode6 和 mode2<a hidden class="anchor" aria-hidden="true" href="#6-收益归因主要来自-mode5mode6-和-mode2">#</a></h2>
+<p>只展示一条净值曲线是不够的。更重要的问题是：收益来自哪里？</p>
+<p><img alt="按 mode 收益贡献" loading="lazy" src="/images/level2_assets/04_mode_contribution_cn.png"></p>
+<p><img alt="按 mode 平均收益" loading="lazy" src="/images/level2_assets/05_mode_avg_return_cn.png"></p>
+<table>
+  <thead>
+      <tr>
+          <th>模式</th>
+          <th style="text-align: right">交易数</th>
+          <th style="text-align: right">胜率</th>
+          <th style="text-align: right">平均净收益</th>
+          <th style="text-align: right">贡献占比</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>mode2</td>
+          <td style="text-align: right">11</td>
+          <td style="text-align: right">81.8%</td>
+          <td style="text-align: right">9.1%</td>
+          <td style="text-align: right">20.0%</td>
+      </tr>
+      <tr>
+          <td>mode3</td>
+          <td style="text-align: right">19</td>
+          <td style="text-align: right">52.6%</td>
+          <td style="text-align: right">2.3%</td>
+          <td style="text-align: right">8.8%</td>
+      </tr>
+      <tr>
+          <td>mode4</td>
+          <td style="text-align: right">7</td>
+          <td style="text-align: right">42.9%</td>
+          <td style="text-align: right">1.5%</td>
+          <td style="text-align: right">2.1%</td>
+      </tr>
+      <tr>
+          <td>mode5</td>
+          <td style="text-align: right">50</td>
+          <td style="text-align: right">68.0%</td>
+          <td style="text-align: right">4.7%</td>
+          <td style="text-align: right">47.1%</td>
+      </tr>
+      <tr>
+          <td>mode6</td>
+          <td style="text-align: right">12</td>
+          <td style="text-align: right">75.0%</td>
+          <td style="text-align: right">9.2%</td>
+          <td style="text-align: right">22.1%</td>
+      </tr>
+  </tbody>
+</table>
+<p>从贡献看，收益主要来自三条路径：</p>
+<ol>
+<li><strong>mode5 个股先发突破</strong>：贡献约 47.1%，是最主要收益来源；</li>
+<li><strong>mode6 主线突破承接</strong>：贡献约 22.1%，交易数较少但单笔收益较强；</li>
+<li><strong>mode2 题材共振核心</strong>：贡献约 20.0%，胜率最高。</li>
+</ol>
+<p>这说明策略不是靠所有规则平均赚钱，而是靠“个股先发 + 主线承接 + 共振核心”三类结构承担主要收益。mode3 和 mode4 更像补充模式，它们的存在有助于覆盖部分修复和结构突破样本，但不是主收益引擎。</p>
+<hr>
+<h2 id="7-退出归因强势延续与失败桶分离">7. 退出归因：强势延续与失败桶分离<a hidden class="anchor" aria-hidden="true" href="#7-退出归因强势延续与失败桶分离">#</a></h2>
+<p>买点只是策略的一半。A 股 T+1 的难点在于：当天买入后不能卖出，次日如果预期落空，需要决定是减仓、止损、等待修复还是时间衰减。</p>
+<p><img alt="退出原因与平均收益" loading="lazy" src="/images/level2_assets/06_exit_reason_cn.png"></p>
+<p>从退出原因看，<code>time_decay</code> 是主要盈利退出，48 笔交易胜率 100%，平均单笔净收益约 12.1%。这说明正常强势延续样本并不需要过早卖出，时间衰减本身就是强票退出的一部分。</p>
+<p>相反，亏损主要集中在两个失败桶：</p>
+<ul>
+<li><code>day2_expectation_reduce + day2_close_exit</code>：10 笔，胜率 0%，平均净收益约 -10.6%；</li>
+<li><code>mode5_low_open_breakout_reduce + dynamic_stop</code>：12 笔，胜率 16.7%，平均净收益约 -1.5%。</li>
+</ul>
+<p>这个归因说明，失败不是随机分布的，而是集中在“次日不及预期”和“独立突破后的低开失败”这两类路径上。后续优化不应该盲目扩大卖点，而应该围绕这些重复失败桶继续做条件拆分。</p>
+<hr>
+<h2 id="8-因子分桶承接结构最终分与入场时间">8. 因子分桶：承接、结构、最终分与入场时间<a hidden class="anchor" aria-hidden="true" href="#8-因子分桶承接结构最终分与入场时间">#</a></h2>
+<p>因子不是因为看起来合理就有效。每个因子都要接受分桶、跨窗口和消融检验。</p>
+<p><img alt="承接分分桶" loading="lazy" src="/images/level2_assets/07_factor_absorption_cn.png"></p>
+<p><img alt="结构分分桶" loading="lazy" src="/images/level2_assets/08_factor_structure_cn.png"></p>
+<p>承接分和结构分的分桶结果显示，中高分桶整体优于低分桶，但最高分桶并不总是最优。这一点很重要：它说明强因子不是越极端越好，过高的承接或结构可能也包含“情绪释放末端”或“过度延伸”的成分。</p>
+<p><img alt="入场时间分桶" loading="lazy" src="/images/level2_assets/09_factor_entry_time_cn.png"></p>
+<p>入场时间的分桶更符合直觉：更靠近开盘的确认样本收益更高，09:41~10:00 的样本表现明显变弱。这支持一个交易原则：短线强势股的有效买点应尽量贴近早盘真实确认，而不是等到情绪已经释放完成后再追。</p>
+<hr>
+<h2 id="9-mode5-与-mode6-的专项验证">9. mode5 与 mode6 的专项验证<a hidden class="anchor" aria-hidden="true" href="#9-mode5-与-mode6-的专项验证">#</a></h2>
+<h3 id="91-mode5个股先于题材的-stock-first-假设">9.1 mode5：个股先于题材的 stock-first 假设<a hidden class="anchor" aria-hidden="true" href="#91-mode5个股先于题材的-stock-first-假设">#</a></h3>
+<p>mode5 的核心假设是：当个股结构和盘口足够强时，即使题材共振还不充分，也可能出现“个股先于题材”的独立突破。</p>
+<p><img alt="mode5 专项验证" loading="lazy" src="/images/level2_assets/10_mode5_validation_cn.png"></p>
+<p>在当前样本里，“强结构 + 强盘口 + 弱题材”的 mode5 样本表现好于“强结构 + 强盘口 + 强题材”分组，说明 stock-first 逻辑在当前窗口内具备一定解释力。不过，“弱结构 + 强盘口 + 弱题材”分组平均收益也不低，这提示 mode5 的真实收益来源可能不只是结构，还包含早盘盘口和身份特征。后续需要继续用更严格消融确认结构因子的边际贡献。</p>
+<h3 id="92-mode6d-1-突破与-d0-早盘承接">9.2 mode6：D-1 突破与 D0 早盘承接<a hidden class="anchor" aria-hidden="true" href="#92-mode6d-1-突破与-d0-早盘承接">#</a></h3>
+<p>mode6 的核心假设是：前一日完成主线压力突破，次日早盘仍有可见承接，可能形成可执行的主线延续买点。</p>
+<p><img alt="mode6 专项验证" loading="lazy" src="/images/level2_assets/11_mode6_validation_cn.png"></p>
+<p>当前 <code>D-1 突破 + D0 确认</code> 分组交易数 22，胜率约 72.7%，平均单笔净收益约 8.8%。不过，对照组样本较少或为空，说明当前 mode6 的负样本对照还不完整。它可以作为执行大桶继续观察，但还不能把全部结论建立在单一分组上。</p>
+<hr>
+<h2 id="10-证伪状态已经做了什么还差什么">10. 证伪状态：已经做了什么，还差什么<a hidden class="anchor" aria-hidden="true" href="#10-证伪状态已经做了什么还差什么">#</a></h2>
+<p>当前版本已经完成：</p>
+<ul>
+<li>Strict T+1口径下的可复现回测；</li>
+<li>mode 级收益归因；</li>
+<li>退出原因归因；</li>
+<li>承接分、结构分、入场时间等分桶观察；</li>
+<li>mode5 / mode6 专项分组验证；</li>
+<li>执行可行性初步诊断。</li>
+</ul>
+<p>但还有几类证据不能过度包装：</p>
+<table>
+  <thead>
+      <tr>
+          <th>模块</th>
+          <th>当前状态</th>
+          <th>解释</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>真实模块消融</td>
+          <td>待补跑</td>
+          <td><code>no_environment_gate</code>、<code>no_absorption_score</code>、<code>no_mode5</code> 等尚未真实重跑</td>
+      </tr>
+      <tr>
+          <td>事件级前瞻</td>
+          <td>面板已建，但覆盖不足</td>
+          <td>1D/2D/3D 前瞻主要覆盖少量事件，5D 前瞻为空</td>
+      </tr>
+      <tr>
+          <td>成本敏感性</td>
+          <td>不完整</td>
+          <td>当前只展示 2 bps 成本和 10 bps 滑点，高滑点版本待补</td>
+      </tr>
+      <tr>
+          <td>基准净值</td>
+          <td>暂缺</td>
+          <td>当前输出包没有 benchmark_nav，无法画策略 vs 指数基准</td>
+      </tr>
+      <tr>
+          <td>99 笔 vs 94 笔口径</td>
+          <td>需要补齐</td>
+          <td>regenerated output 与 accepted benchmark 口径不同，需要单独 reconciliate</td>
+      </tr>
+  </tbody>
+</table>
+<p>因此，本文的结论应理解为：当前系统具备可解释的收益来源和初步证伪框架，但还没有完成最终生产级因子证伪。真正的最终版还需要补跑模块级消融、完整事件级前瞻和成本敏感性。</p>
+<hr>
+<h2 id="11-风险归因与反过拟合纪律">11. 风险归因与反过拟合纪律<a hidden class="anchor" aria-hidden="true" href="#11-风险归因与反过拟合纪律">#</a></h2>
+<p>这类策略最大的风险是把某个局部窗口的规则误认为普遍有效。因此我把规则迭代分成三类：</p>
+<ol>
+<li><strong>可上线规则</strong>：跨窗口稳定、消融有效、不会误伤主路径；</li>
+<li><strong>诊断标签</strong>：能解释失败，但暂时不能直接参与买卖；</li>
+<li><strong>纸面观察规则</strong>：局部有效但样本少，只记录不执行。</li>
+</ol>
+<p>几个反过拟合原则：</p>
+<ul>
+<li>新规则不能只因为单票或单月好看就晋级；</li>
+<li>如果放宽阈值后样本变多但误伤赢家增加，优先拒绝；</li>
+<li>价格弱或盘口弱不能单独构成卖点，必须结合市场、题材、个股上下文；</li>
+<li>所有新增规则都必须说明最早可见时点；</li>
+<li><code>intraday_proxy</code> 只能用于诊断失败结构，不能替代 S trict T+1 收益口径。</li>
+</ul>
+<hr>
+<h2 id="12-后续计划">12. 后续计划<a hidden class="anchor" aria-hidden="true" href="#12-后续计划">#</a></h2>
+<p>下一阶段的工作不是继续堆规则，而是补齐证据链：</p>
+<ol>
+<li><strong>补真实消融</strong>：优先补 <code>no_environment_gate</code>、<code>no_absorption_score</code>、<code>no_theme_layer</code>、<code>no_mode5</code>、<code>no_mode6</code>；</li>
+<li><strong>补事件级前瞻</strong>：对全部候选补齐 1/2/3/5 日前瞻收益、MFE 和 MAE；</li>
+<li><strong>补成本敏感性</strong>：跑 20/30/50 bps 高滑点场景；</li>
+<li><strong>补 benchmark_nav</strong>：加入中证1000、万得全A或自定义短线情绪基准；</li>
+<li><strong>统一口径</strong>：明确 99 笔 regenerated output 与 94 笔 accepted benchmark 的差异；</li>
+<li><strong>继续 paper trial</strong>：新规则只先进入纸面观察，不直接进入默认 baseline。</li>
+</ol>
+<hr>
+<h2 id="13-结语">13. 结语<a hidden class="anchor" aria-hidden="true" href="#13-结语">#</a></h2>
+<p>从当前结果看，收益主要来自 <code>mode5</code> 的个股先发突破、<code>mode6</code> 的主线突破承接和 <code>mode2</code> 的题材共振核心；亏损则集中在次日不及预期和低开失败等重复失败桶。这个结构说明，系统的下一步优化不应该是大范围扩展规则，而应该继续围绕少数稳定失败链做严格验证。</p>
+<p>对我来说，一个策略是否值得继续研究，不取决于它是否在某段历史中收益最高，而取决于：</p>
+<ul>
+<li>它的信号来源是否可解释；</li>
+<li>它的收益来源是否能拆解；</li>
+<li>它的失败样本是否可归因；</li>
+<li>它的因子是否经得起证伪；</li>
+<li>它是否能在真实交易约束下仍然成立。</li>
+</ul>
+<p>这也是这个 Level2 主题信号系统后续迭代的核心方向。</p>
+
+
+  </div>
+
+  <footer class="post-footer">
+    <ul class="post-tags">
+    </ul>
+  </footer>
+</article>
+    </main>
+    
+<footer class="footer">
+        <span>&copy; 2026 <a href="http://localhost:1313/">我的量化之路</a></span> · 
+
+    
+    
+    <span>
+        Powered by
+        <a href="https://gohugo.io/?utm_source=papermod" rel="noopener" target="_blank">Hugo</a> &
+        <a href="https://github.com/adityatelange/hugo-PaperMod/" rel="noopener" target="_blank">PaperMod</a>
+    </span>
+</footer>
+<a href="#top" id="top-link" class="top-link hidden" aria-label="go to top" title="Go to Top (Alt + G)" accesskey="g">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevrons-up">
+        <polyline points="17 11 12 6 7 11"></polyline>
+        <polyline points="17 18 12 13 7 18"></polyline>
+    </svg>
+</a>
+
+<script>
+    let menu = document.getElementById('menu');
+    if (menu) {
+        
+        const scrollPosition = localStorage.getItem("menu-scroll-position");
+        if (scrollPosition) {
+            menu.scrollLeft = parseInt(scrollPosition, 10);
+        }
+        
+        menu.onscroll = function () {
+            localStorage.setItem("menu-scroll-position", menu.scrollLeft);
+        }
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            var id = this.getAttribute("href").substr(1);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
+                    behavior: "smooth"
+                });
+            } else {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
+            }
+            if (id === "top") {
+                history.replaceState(null, null, " ");
+            } else {
+                history.pushState(null, null, `#${id}`);
+            }
+        });
+    });
+
+</script>
+<script>
+    var toplink = document.getElementById("top-link");
+    window.onscroll = function () {
+        const scrollThreshold = window.innerHeight;
+        if (document.body.scrollTop > scrollThreshold || document.documentElement.scrollTop > scrollThreshold) {
+            toplink.classList.remove("hidden");
+        } else {
+            toplink.classList.add("hidden");
+        }
+    };
+
+</script>
+<script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+        const html = document.querySelector("html");
+        if (html.dataset.theme === "dark") {
+            html.dataset.theme = 'light';
+            localStorage.setItem("pref-theme", 'light');
+        } else {
+            html.dataset.theme = 'dark';
+            localStorage.setItem("pref-theme", 'dark');
+        }
+    })
+
+</script>
+<script>
+    document.querySelectorAll('pre > code').forEach((codeblock) => {
+        const container = codeblock.parentNode.parentNode;
+
+        const copybutton = document.createElement('button');
+        copybutton.classList.add('copy-code');
+        copybutton.innerHTML = 'copy';
+
+        function copyingDone() {
+            copybutton.innerHTML = 'copied!';
+            setTimeout(() => {
+                copybutton.innerHTML = 'copy';
+            }, 2000);
+        }
+
+        copybutton.addEventListener('click', (cb) => {
+            if ('clipboard' in navigator) {
+                navigator.clipboard.writeText(codeblock.textContent);
+                copyingDone();
+                return;
+            }
+
+            const range = document.createRange();
+            range.selectNodeContents(codeblock);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            try {
+                document.execCommand('copy');
+                copyingDone();
+            } catch (e) { };
+            selection.removeRange(range);
+        });
+
+        if (container.classList.contains("highlight")) {
+            container.appendChild(copybutton);
+        } else if (container.parentNode.firstChild == container) {
+            
+        } else if (codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.nodeName == "TABLE") {
+            
+            codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.appendChild(copybutton);
+        } else {
+            
+            codeblock.parentNode.appendChild(copybutton);
+        }
+    });
+</script>
+</body>
+
+</html>

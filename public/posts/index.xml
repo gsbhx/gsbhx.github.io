@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Posts on 我的量化之路</title>
+    <link>http://localhost:1313/posts/</link>
+    <description>Recent content in Posts on 我的量化之路</description>
+    <generator>Hugo</generator>
+    <language>zh-cn</language>
+    <lastBuildDate>Sat, 23 May 2026 11:22:48 +0800</lastBuildDate>
+    <atom:link href="http://localhost:1313/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>A股Level2主题信号策略复现与验证</title>
+      <link>http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/</link>
+      <pubDate>Sat, 23 May 2026 11:22:48 +0800</pubDate>
+      <guid>http://localhost:1313/posts/a%E8%82%A1level2%E4%B8%BB%E9%A2%98%E4%BF%A1%E5%8F%B7%E7%AD%96%E7%95%A5%E5%A4%8D%E7%8E%B0%E4%B8%8E%E9%AA%8C%E8%AF%81/</guid>
+      <description>&lt;blockquote&gt;
+&lt;p&gt;文中展示策略研究框架、回测口径、收益归因和风险诊断，不展示完整股票池、完整代码、实盘交易指令或可直接复刻的细节参数。本文仅用于量化研究方法讨论，不构成任何投资建议。&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2 id=&#34;0-摘要&#34;&gt;0. 摘要&lt;/h2&gt;
+&lt;p&gt;这项研究围绕 A 股短线强势股中的“主题扩散 + 资金承接”现象展开。策略的核心是：&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;在什么市场环境下，主线题材中的前排个股更可能出现可交易的延续？&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;为回答这个问题，我把候选标的拆成四层信号：&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;市场层&lt;/strong&gt;：判断大环境是否允许短线进攻；&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;情绪层&lt;/strong&gt;：判断短线接力是否活跃，亏钱效应是否可控；&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;题材层&lt;/strong&gt;：判断题材是否为主线、是否有扩散和梯队；&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;个股层&lt;/strong&gt;：用竞价、分时、结构突破和 Level2 盘口承接确认具体买点。&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;最终系统不是用一个统一分数解释所有交易，而是把不同强势股结构拆成多个 &lt;code&gt;mode&lt;/code&gt;：例如共振核心、分歧转强、结构突破、个股先发突破、主线突破承接等。不同模式使用不同的验证逻辑、仓位约束和退出纪律。&lt;/p&gt;
+&lt;p&gt;当前可复现输出包采用 &lt;strong&gt;strict T+1&lt;/strong&gt; 作为默认收益解释，覆盖 2024-07-01 至 2026-04-30。当前再生成输出包含 99 笔交易，胜率约 65.7%，平均单笔净收益约5.1%，总收益约 156.8%，最大回撤约 9.6%。正式冻结口径中另有 94 笔，但由于历史 release artifact 不在当前输出包内，本文的图表和归因统一使用当前可复现的99笔。&lt;/p&gt;
+&lt;hr&gt;
+&lt;h2 id=&#34;1-研究假设短线收益来自主线扩散与个股承接&#34;&gt;1. 研究假设：短线收益来自主线扩散与个股承接&lt;/h2&gt;
+&lt;p&gt;A 股短线强势股的收益通常不是孤立个股随机上涨，而是多层结构共同作用的结果：市场风险偏好支持、短线情绪扩散、题材成为主线、前排个股出现真实资金承接。四层结构越接近有利状态，交易胜率和延续性越高。&lt;/p&gt;
+&lt;table&gt;
+  &lt;thead&gt;
+      &lt;tr&gt;
+          &lt;th&gt;层级&lt;/th&gt;
+          &lt;th&gt;核心假设&lt;/th&gt;
+          &lt;th&gt;可观察证据&lt;/th&gt;
+          &lt;th&gt;主要风险&lt;/th&gt;
+      &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+      &lt;tr&gt;
+          &lt;td&gt;市场层&lt;/td&gt;
+          &lt;td&gt;指数和市场状态决定能否进攻&lt;/td&gt;
+          &lt;td&gt;指数强弱、成交环境、风险偏好、市场状态&lt;/td&gt;
+          &lt;td&gt;弱市强票容易冲高回落，仓位需要压缩&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td&gt;情绪层&lt;/td&gt;
+          &lt;td&gt;短线情绪影响接力成功率&lt;/td&gt;
+          &lt;td&gt;涨停扩散、连板高度、炸板修复、亏钱效应&lt;/td&gt;
+          &lt;td&gt;情绪退潮时同样形态的成功率下降&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td&gt;题材层&lt;/td&gt;
+          &lt;td&gt;主线题材提供资金聚集方向&lt;/td&gt;
+          &lt;td&gt;题材宽度、梯队、多板数量、核心标的带动&lt;/td&gt;
+          &lt;td&gt;非主线题材容易一日游&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td&gt;个股层&lt;/td&gt;
+          &lt;td&gt;Level2 承接确认买点质量&lt;/td&gt;
+          &lt;td&gt;竞价金额、开盘承接、盘口失衡、结构突破&lt;/td&gt;
+          &lt;td&gt;假突破、低开下杀、盘口衰竭导致亏损&lt;/td&gt;
+      &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;这个框架的重点不是把四层分数机械相加，而是让不同层级承担不同职责：&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;市场和情绪决定风险预算；&lt;/li&gt;
+&lt;li&gt;题材决定资金方向；&lt;/li&gt;
+&lt;li&gt;个股 Level2 决定是否真的有承接；&lt;/li&gt;
+&lt;li&gt;交易层再把信号转化为仓位、买入、减仓和退出。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;hr&gt;
+&lt;h2 id=&#34;2-数据工程与可见性边界&#34;&gt;2. 数据工程与可见性边界&lt;/h2&gt;
+&lt;p&gt;策略同时使用日线、题材归因、候选池、分钟线和 Level2 快照。数据工程的核心是明确每个字段在交易决策时点是否可见。&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>A股行业轮动策略验证项目实现流程与可观察性证据</title>
+      <link>http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/</link>
+      <pubDate>Sat, 23 May 2026 11:22:48 +0800</pubDate>
+      <guid>http://localhost:1313/posts/1.-a%E8%82%A1%E8%A1%8C%E4%B8%9A%E8%BD%AE%E5%8A%A8%E7%AD%96%E7%95%A5%E9%AA%8C%E8%AF%81%E9%A1%B9%E7%9B%AE%E5%AE%9E%E7%8E%B0%E6%B5%81%E7%A8%8B%E4%B8%8E%E5%8F%AF%E8%A7%82%E5%AF%9F%E6%80%A7%E8%AF%81%E6%8D%AE/</guid>
+      <description>&lt;h2 id=&#34;项目总览&#34;&gt;项目总览&lt;/h2&gt;
+&lt;p&gt;这是一个基于A股行业轮动的多时点量价复合策略验证项目。项目聚焦于2024-2025年这一极端分化、快速轮动的市场周期，通过自主搭建的、支持分钟级事件与横截面排序的回测框架，精细解耦了“日频趋势层”、“宏观大盘环境切换层”以及“盘中微观结构层（开盘八法）”，并通过消融实验与事件级前瞻面板，完成了对因子的归因与策略迭代。
+我们按照研究假设、特征工程、回测引擎、消融归因、事件级前瞻、优化路线的流程展开。&lt;/p&gt;
+&lt;p&gt;&lt;img alt=&#34;六步研究闭环与三层策略结构&#34; loading=&#34;lazy&#34; src=&#34;http://localhost:1313/images/figure_02_research_hypothesis_canvas.png&#34;&gt;&lt;/p&gt;
+&lt;h2 id=&#34;一量化假设与研究目标设定research-hypothesis&#34;&gt;一、量化假设与研究目标设定（Research Hypothesis）&lt;/h2&gt;
+&lt;p&gt;做这一步的目的，是先把项目边界和研究假设说清楚：到底要验证什么，哪些是可被证伪的，哪些只是在组合层起作用。
+研究边界锁定为2024-01-02至2025-11-28，因子研究对象是A股行业指数横截面，因子测试中排除000300.SH与511010.SH等非行业/非权益用途标的；组合回测中000300.SH用作大盘环境判断与基准收益对比。&lt;/p&gt;
+&lt;table&gt;
+  &lt;thead&gt;
+      &lt;tr&gt;
+          &lt;th&gt;核心假设&lt;/th&gt;
+          &lt;th&gt;含义&lt;/th&gt;
+          &lt;th&gt;验证方法&lt;/th&gt;
+          &lt;th&gt;本版结论&lt;/th&gt;
+      &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+      &lt;tr&gt;
+          &lt;td&gt;H1 日频动量假设&lt;/td&gt;
+          &lt;td&gt;factor_score / trend_score 可以筛选潜在强势行业池&lt;/td&gt;
+          &lt;td&gt;RankIC、分组收益、多空组合&lt;/td&gt;
+          &lt;td&gt;不成立：5日 IC 显著为负，高分更像过热风险&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td&gt;H2 开盘微观结构假设&lt;/td&gt;
+          &lt;td&gt;9:30-9:45 的三根 5分钟K 线排列有短期预测力&lt;/td&gt;
+          &lt;td&gt;open8 事件面板、最终入选信号前瞻收益&lt;/td&gt;
+          &lt;td&gt;部分成立：全样本有方向性，买入端有误杀，卖出端贡献更强&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td&gt;H3 大盘异质性假设&lt;/td&gt;
+          &lt;td&gt;A股不同市场状态下应切换 TargetA / TargetB 路径&lt;/td&gt;
+          &lt;td&gt;固定 TargetA/B 消融&lt;/td&gt;
+          &lt;td&gt;成立：固定 TargetA 只剩 36.36%，固定 TargetB 为 73.08%&lt;/td&gt;
+      &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;img alt=&#34;研究假设、研究边界与验证方法&#34; loading=&#34;lazy&#34; src=&#34;http://localhost:1313/images/figure_02_research_hypothesis_canvas.png&#34;&gt;&lt;/p&gt;
+&lt;h2 id=&#34;二特征工程与多模态因子构建feature-engineering&#34;&gt;二、特征工程与多模态因子构建（Feature Engineering）&lt;/h2&gt;
+&lt;p&gt;这一阶段把原始分钟级和日级OHLCV数据转化为可验证的信号。信号被拆成三类：日频趋势/动量排序层、盘中微观结构层，以及尾部风险过滤层。&lt;/p&gt;
+&lt;table&gt;
+  &lt;thead&gt;
+      &lt;tr&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;因子/模块&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;实现方式&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;输出字段&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;用途&lt;/th&gt;
+      &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;趋势/动量排序层&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;ma3/ma10环比、ma10_pct rolling slope、ma3_pct/ma10_pct 比率等分段打分&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;factor_score&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;形成日频候选强度评分，并用于 IC/分组收益验证&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;量价共振状态层&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;ma5&amp;gt;= ma20，vol_ma5&amp;gt;=vol_ma20的组合状态&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;trend_score：0/1/2&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;判断价格趋势与量能是否同向共振&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;微观结构信号层&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;analyze_opening_pattern识别9:30-9:45三根 5分钟K线红黑排列&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;strong_buy / buy / neutral / sell / strong_sell&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;用于 09:45 买入确认和开盘卖出风险拦截&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;极端尾部风险过滤层&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;正式9:45 crash_filter使用30日窗口，最近15日检查跌幅&amp;gt;4.5%、阴线、成交量&amp;gt;2倍20日均量&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;crash_filter&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;剔除近期出现极端放量下跌的高风险行业&lt;/td&gt;
+      &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;!特征工程与多层信号结构](/images/figure_03_feature_architecture.png)&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>基于动态年化收益率的ETF期权双卖策略回测验证与风险归因系统</title>
+      <link>http://localhost:1313/posts/2.-%E5%9F%BA%E4%BA%8E%E5%8A%A8%E6%80%81%E5%B9%B4%E5%8C%96%E6%94%B6%E7%9B%8A%E7%8E%87%E7%9A%84etf%E6%9C%9F%E6%9D%83%E5%8F%8C%E5%8D%96%E7%AD%96%E7%95%A5%E5%9B%9E%E6%B5%8B%E9%AA%8C%E8%AF%81%E4%B8%8E%E9%A3%8E%E9%99%A9%E5%BD%92%E5%9B%A0%E7%B3%BB%E7%BB%9F/</link>
+      <pubDate>Sat, 23 May 2026 11:22:48 +0800</pubDate>
+      <guid>http://localhost:1313/posts/2.-%E5%9F%BA%E4%BA%8E%E5%8A%A8%E6%80%81%E5%B9%B4%E5%8C%96%E6%94%B6%E7%9B%8A%E7%8E%87%E7%9A%84etf%E6%9C%9F%E6%9D%83%E5%8F%8C%E5%8D%96%E7%AD%96%E7%95%A5%E5%9B%9E%E6%B5%8B%E9%AA%8C%E8%AF%81%E4%B8%8E%E9%A3%8E%E9%99%A9%E5%BD%92%E5%9B%A0%E7%B3%BB%E7%BB%9F/</guid>
+      <description>&lt;p&gt;基于 159919 ETF 期权的名义现金备付双卖策略（100% 名义仓位 / 0 杠杆）&lt;/p&gt;
+&lt;h2 id=&#34;31-项目定位与背景&#34;&gt;3.1 项目定位与背景&lt;/h2&gt;
+&lt;p&gt;本项目围绕 ETF 期权动态年化收益率双卖策略展开。策略的基础结构是同时卖出虚值 Call 和虚值 Put，收取两侧权利金；但本项目并不是固定虚值、固定 Delta 或固定到期日的机械双卖，而是把“当前权利金能够提供的名义年化收益率”作为开仓温度计，用收益率门槛决定是否值得卖出期权。&lt;/p&gt;
+&lt;p&gt;在 100% 名义仓位、0 杠杆前提下，回测中出现了“约3%最大回撤换取约40%的总收益”的参数组合。这个策略不是只追求高收益，而是在收益、回撤、仓位占用和退出规则之间做了平衡。&lt;/p&gt;
+&lt;h2 id=&#34;32-策略结构两腿动态双卖&#34;&gt;3.2 策略结构：两腿动态双卖&lt;/h2&gt;
+&lt;p&gt;策略由两条卖方腿组成：卖出虚值Call，收取上方权利金；卖出虚值Put，收取下方权利金。开仓时先根据目标虚值比例TargetOTMPct定位基础Call/Put行权价，再计算该组合的名义年化收益率。如果收益率低于MinNotionalYield，则放弃开仓。&lt;/p&gt;
+&lt;p&gt;核心公式如下：&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre tabindex=&#34;0&#34; style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;&#34;&gt;&lt;code class=&#34;language-fallback&#34; data-lang=&#34;fallback&#34;&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;认购行权价 = ETF现价 × (1 + TargetOTMPct)
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;目标认沽行权价 = ETF现价 × (1 - TargetOTMPct)
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;名义年化收益率 = (Call权利金 + Put权利金) / ETF现价 × 365 / DTE
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;单组名义本金 = ETF现价 × 10000
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;开仓组数 = floor(账户资金 × PositionRatio / 单组名义本金)
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;h2 id=&#34;33-核心参数设计&#34;&gt;3.3 核心参数设计&lt;/h2&gt;
+&lt;table&gt;
+  &lt;thead&gt;
+      &lt;tr&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;&lt;strong&gt;参数&lt;/strong&gt;&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;&lt;strong&gt;含义&lt;/strong&gt;&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;&lt;strong&gt;当前搜索/测试范围&lt;/strong&gt;&lt;/th&gt;
+          &lt;th style=&#34;text-align: left&#34;&gt;&lt;strong&gt;策略作用&lt;/strong&gt;&lt;/th&gt;
+      &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;PositionRatio&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;名义仓位比例&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;1.0&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;代表 100% 名义现金备付，0 杠杆&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;TargetOTMPct&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;基础开仓虚值比例&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;1% - 8%，当前最佳 2%&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;决定初始 Call/Put 离现价的距离&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;MinNotionalYield&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;最低名义年化门槛&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;5% - 30%，当前最佳 25%&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;收益率低于门槛时不交易&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;MaxLossMultiple&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;权利金止损倍数&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;1.0 - 3.0，当前最佳 1.0&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;控制权利金扩大后的极端损失&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;TakeProfitPct&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;止盈比例&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;20% - 90%，当前最佳 60%&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;权利金回落到一定比例后获利退出&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;ExitDTE&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;临期退出天数&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;2 - 7 天&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;避免临近到期 Gamma 风险和流动性风险&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;VolExpandTrigger&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;高波防守触发倍数&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;1.2 - 3.0，当前最佳 2.0/2.8&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;当基准收益显著高于历史均值时触发动态外扩&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;MaxDynamicOTM&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;最大动态退守虚值&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;5% - 9%，当前最佳 5%&lt;/td&gt;
+          &lt;td style=&#34;text-align: left&#34;&gt;限制外扩幅度，防止收益被过度稀释&lt;/td&gt;
+      &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2 id=&#34;34-数据工程与期权链构建&#34;&gt;3.4 数据工程与期权链构建&lt;/h2&gt;
+&lt;p&gt;策略回测的第一步是构建可用的分钟级期权链。项目从 ETF 分钟线、期权静态信息和各期权合约分钟行情出发，将标的价格与期权价格按时间戳对齐，并为每个有效时间点构建多到期日的 Call/Put 期权链。&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>
